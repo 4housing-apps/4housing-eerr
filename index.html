@@ -266,7 +266,7 @@ function seccion(g){
   return"INGOP";}
 const LETRA=g=>(g.match(/^([A-Z])\)/)||[,"?"])[1];
 let chMes,chLinea;
-function rangoMeses(){const a=+document.getElementById("from").value,b=+document.getElementById("to").value;return MESES.slice(Math.min(a,b),Math.max(a,b)+1);}
+function rangoMeses(){const a=+document.getElementById("from").value,b=+document.getElementById("to").value;return DATA.meses.slice(Math.min(a,b),Math.max(a,b)+1);}
 function disp(g,ym,cur){const v=g.serie[ym];const raw=v?+v[cur]:0;return g.movim==="INGRESOS"?-raw:raw;}
 function recompute(){
   const cur=+document.getElementById("cur").value, meses=rangoMeses();
@@ -796,6 +796,12 @@ function aplicarDatos(rows){
   PROJ_DATA.mult=r.projData.mult;
   PROJ_DATA.aperturas.length=0;r.projData.aperturas.forEach(a=>PROJ_DATA.aperturas.push(a));
   DATA.grupos.length=0;r.eerrData.grupos.forEach(g=>DATA.grupos.push(g));
+  // El rango de meses de rebuildData() es una ventana fija interna (para el presupuesto); acá lo
+  // extendemos con cualquier mes real que haya aparecido en los datos, para que el desplegable
+  // Desde/Hasta y los cálculos no se queden pegados a esa ventana si el archivo trae meses nuevos.
+  const mesesVistos=new Set(DATA.meses);
+  DATA.grupos.forEach(g=>Object.keys(g.serie).forEach(m=>mesesVistos.add(m)));
+  DATA.meses=[...mesesVistos].sort();
   const bs=r.budget||{},MES=DATA.meses,TR=MES.slice(-12),rd2=v=>Math.round(v*100)/100,seen={};
   CONFIG_PTO.forEach(c=>{const s=(bs[c.grupo]||{})[c.cuenta]||{};const serie={};MES.forEach(m=>serie[m]=s[m]?s[m].map(rd2):[0,0,0,0]);c.serie=serie;const r12=TR.reduce((a,m)=>a+serie[m][3],0);c.real_12m=rd2(r12);c.prom_mensual=rd2(r12/12);seen[c.grupo+"::"+c.cuenta]=1;});
   let added=0;const PFX={"K) ESTRUCTURA":"","K) ESTRUCTURA NQN":"NQN·","O) IMPUESTOS":"IMP·","N) SUELDOS":"SUE·"};
@@ -827,6 +833,11 @@ function aplicarDatos(rows){
         const hd=(""+(rows[0]&&rows[0][1]||"")).toLowerCase();
         if(!(hd.includes("auxiliar")||hd.includes("tipo"))){msg.textContent="\u2717 El archivo no parece un export de Tango (no encuentro las columnas esperadas).";msg.className="updmsg err";return;}
         const res=aplicarDatos(rows);
+        const fSel=document.getElementById("from"),tSel=document.getElementById("to");
+        fSel.innerHTML="";tSel.innerHTML="";
+        DATA.meses.forEach((m,i)=>{fSel.add(new Option(mesLabel(m),i));tSel.add(new Option(mesLabel(m),i));});
+        fSel.value=0;tSel.value=DATA.meses.length-1;
+        try{recompute();}catch(e){console.warn(e);}
         const A=new Set(["A) VENTA","A) CMV VENTA"]);let eA=0;DATA.grupos.forEach(g=>{if(A.has(g.grupo))for(const y in g.serie)eA+=g.serie[y][0];});
         let cmv=0;PROJ_DATA.aperturas.forEach(a=>{for(const m in a.mov)for(const y in a.mov[m])cmv+=a.mov[m][y][0];});
         const dif=Math.abs(eA-cmv),ok=dif<Math.max(1,Math.abs(eA)*0.001);
