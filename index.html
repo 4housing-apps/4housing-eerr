@@ -192,6 +192,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
     <div class="ctl"><label for="from">Desde</label><select id="from"></select></div>
     <div class="ctl"><label for="to">Hasta</label><select id="to"></select></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="tablaCsv">Descargar Excel</button></div>
   </div>
   <div class="kpis" id="kpis"></div>
   <div class="grid2">
@@ -547,6 +548,12 @@ async function initCMV(){
   MESES.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
   f.value=0;t.value=MESES.length-1;
   ["cur","from","to"].forEach(id=>document.getElementById(id).addEventListener("change",recompute));
+  document.getElementById("tablaCsv").addEventListener("click",()=>{
+    const curLbl=["pesos","usd_oficial","usd_billete","axi"][+document.getElementById("cur").value]||"tabla";
+    const f=document.getElementById("from"),t=document.getElementById("to");
+    const desde=(mesLabel(DATA.meses[+f.value]||"")||"").replace(/[^a-z0-9]/gi,""),hasta=(mesLabel(DATA.meses[+t.value]||"")||"").replace(/[^a-z0-9]/gi,"");
+    exportTablaGen("tabla",`estado_resultados_${curLbl}_${desde}_${hasta}`);
+  });
   try{recompute();}catch(e){console.warn("eerr:",e);}
 })();
 initPto();
