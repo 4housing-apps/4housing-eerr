@@ -2,6 +2,7 @@
 <html lang="es"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>EERR + Presupuesto — Gestión</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /*!
  * Chart.js v4.4.1
@@ -543,10 +544,11 @@ async function initCMV(){
 }
 
 /* ===== init ===== */
-(function(){
+function initEerrUI(){
   const f=document.getElementById("from"),t=document.getElementById("to");
-  MESES.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
-  f.value=0;t.value=MESES.length-1;
+  f.innerHTML="";t.innerHTML="";
+  DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
+  f.value=0;t.value=DATA.meses.length-1;
   ["cur","from","to"].forEach(id=>document.getElementById(id).addEventListener("change",recompute));
   document.getElementById("tablaCsv").addEventListener("click",()=>{
     const curLbl=["pesos","usd_oficial","usd_billete","axi"][+document.getElementById("cur").value]||"tabla";
@@ -555,9 +557,7 @@ async function initCMV(){
     exportTablaGen("tabla",`estado_resultados_${curLbl}_${desde}_${hasta}`);
   });
   try{recompute();}catch(e){console.warn("eerr:",e);}
-})();
-initPto();
-initCMV();
+}
 
 
 /* ===== Ingesta directa del informe crudo de Tango (raw ledger) ===== */
@@ -579,6 +579,96 @@ let HIST_CAMBIARIO = JSON.parse(JSON.stringify(HIST_CAMBIARIO_FALLBACK));
 const SB_URL='https://aaqpzamcdxldhqyuqlgm.supabase.co';
 const SB_KEY='sb_publishable_WCez44YAKCcOOAJ8hCDe5Q_8IC5Ckpx';
 const SB_REST=SB_URL+'/rest/v1';
+const REDIRECT_URL='https://4housing-apps.github.io/4housing-eerr/'; // GitHub Pages (para el login Azure)
+
+/* ===== Login (Microsoft/Azure vía Supabase Auth) — mismo mecanismo que Compras, mismo proyecto ===== */
+let sbClient=null, AUTH_USER=null;
+function authScreen(msg,btn){
+  document.body.innerHTML=`
+  <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#eceae1;font-family:Arial,sans-serif;">
+    <div style="background:#fff;border:1px solid #e2dfd4;border-radius:16px;padding:40px 38px;max-width:380px;text-align:center;box-shadow:0 14px 44px rgba(0,0,0,.10);">
+      <div style="font-weight:700;font-size:22px;color:#37432c;margin-bottom:6px;">4housing</div>
+      <div style="font-size:13px;color:#94917f;margin-bottom:26px;">EERR + Presupuesto — Gestión</div>
+      <div style="font-size:14px;color:#5f5c52;margin-bottom:22px;line-height:1.5;">${msg}</div>
+      ${btn?`<button id="authBtn" style="background:#5f7a4e;color:#fff;border:none;border-radius:9px;padding:12px 22px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">${btn}</button>`:''}
+    </div>
+  </div>`;
+}
+async function doLogin(){
+  const {error}=await sbClient.auth.signInWithOAuth({provider:'azure',options:{scopes:'openid profile email',redirectTo:REDIRECT_URL}});
+  if(error){
+    authScreen('No se pudo iniciar sesión.<br><span style="font-size:12px;color:#94917f">'+error.message+'</span>','Reintentar');
+    setTimeout(()=>{const b=document.getElementById('authBtn');if(b)b.onclick=doLogin;},50);
+  }
+}
+window.doLogin=doLogin;
+async function initAuth(){
+  if(!window.supabase){
+    authScreen('No se pudo cargar el sistema de inicio de sesión. Verificá tu conexión a internet.','Reintentar');
+    setTimeout(()=>{const b=document.getElementById('authBtn');if(b)b.onclick=()=>location.reload();},50);
+    return false;
+  }
+  sbClient=window.supabase.createClient(SB_URL,SB_KEY);
+  const {data:{session}}=await sbClient.auth.getSession();
+  if(session&&session.user){AUTH_USER=session.user;return true;}
+  authScreen('Ingresá con tu cuenta de Microsoft de la organización para acceder.','Iniciar sesión con Microsoft');
+  setTimeout(()=>{const b=document.getElementById('authBtn');if(b)b.onclick=doLogin;},50);
+  return false;
+}
+
+/* ===== Persistencia del EERR en Supabase (tabla eerr_datos) =====
+   Antes, el informe cargado se perdia al cerrar la pestana y habia que subirlo de nuevo cada
+   vez. Ahora, despues de cada carga exitosa se guarda en Supabase, y al abrir la app (ya
+   logueada) se trae lo ultimo guardado en vez de arrancar siempre del historico de muestra. */
+async function authToken(){
+  try{const {data:{session}}=await sbClient.auth.getSession(); return (session&&session.access_token)||SB_KEY;}
+  catch(e){return SB_KEY;}
+}
+async function guardarEerrEnSupabase(){
+  if(!sbClient) return;
+  const token=await authToken();
+  const filas=[];
+  DATA.grupos.forEach(g=>Object.keys(g.serie).forEach(periodo=>{
+    const[ars,usdOfic,usdBill,axi]=g.serie[periodo];
+    filas.push({grupo:g.grupo,movim:g.movim,periodo,ars:ars||0,usd_ofic:usdOfic||0,usd_bill:usdBill||0,axi:axi||0});
+  }));
+  const CH=500;
+  for(let i=0;i<filas.length;i+=CH){
+    const chunk=filas.slice(i,i+CH);
+    try{
+      const res=await fetch(SB_REST+'/eerr_datos',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(chunk)});
+      if(!res.ok) throw new Error('Supabase '+res.status+': '+await res.text());
+    }catch(e){ console.warn('No se pudo guardar el EERR en Supabase (la tabla eerr_datos existe?):',e); return; }
+  }
+}
+async function cargarEerrDesdeSupabase(){
+  if(!sbClient) return false;
+  try{
+    const token=await authToken();
+    let all=[],offset=0;
+    for(let i=0;i<50;i++){
+      const res=await fetch(SB_REST+'/eerr_datos?select=*&limit=1000&offset='+offset,{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}});
+      if(!res.ok) throw new Error('Supabase '+res.status);
+      const chunk=await res.json();
+      if(!chunk||!chunk.length) break;
+      all=all.concat(chunk);
+      if(chunk.length<1000) break;
+      offset+=1000;
+    }
+    if(!all.length) return false; // todavia no hay nada guardado: se queda con el historico de muestra embebido
+    const byKey={};
+    all.forEach(r=>{
+      const k=r.grupo+"␟"+r.movim;
+      if(!byKey[k]) byKey[k]={};
+      byKey[k][r.periodo]=[+r.ars||0,+r.usd_ofic||0,+r.usd_bill||0,+r.axi||0];
+    });
+    const grupos=Object.keys(byKey).map(k=>{const[grupo,movim]=k.split("␟");return{grupo,movim,serie:byKey[k]};});
+    const mesesSet=new Set(); grupos.forEach(g=>Object.keys(g.serie).forEach(m=>mesesSet.add(m)));
+    DATA.grupos=grupos; DATA.meses=[...mesesSet].sort();
+    return true;
+  }catch(e){ console.warn('No se pudo leer el EERR guardado en Supabase, sigue con el historico de muestra embebido:',e); return false; }
+}
+
 const BILL_CORTE_PROMEDIO='2026-09-01'; // desde esta fecha, USD Billete pasa a promedio compra/venta
 async function sbFetchAllPublic(table, orderCol){
   const page=1000; let offset=0, all=[];
@@ -720,6 +810,8 @@ async function onCargarInformeCrudo(file){
     await fetchLiveTC();
     const res=parseRawLedgerEERR(rows);
     mergeEERRIntoData(res);
+    msgEl.textContent="Guardando en Supabase...";
+    await guardarEerrEnSupabase();
     const f=document.getElementById("from"),t=document.getElementById("to");
     f.innerHTML="";t.innerHTML="";
     DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
@@ -732,6 +824,7 @@ async function onCargarInformeCrudo(file){
     if(LIVE_TC.ofic) m2+=` Cotizacion en vivo obtenida de dolarapi.com (${LIVE_TC.fecha||"hoy"}).`; else m2+=" No se pudo conectar a dolarapi.com (revisa conexion) — fechas fuera del historico quedan sin USD/AXI.";
     if(nPend) m2+=` ⚠ ${nPend} filas sin cotizacion completa (fechas sin historico ni dato en vivo) — no se inventaron valores, quedaron en 0 para esas filas.`;
     if(nIgnor) m2+=` ${nIgnor} filas con grupo no reconocido, ignoradas: ${Object.keys(res.gruposIgnorados).join(", ")}.`;
+    m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
     m2+=" Nota: Proyectos/CMV NO se actualiza con este archivo, sigue con el ultimo cargado.";
     msgEl.className="updmsg ok"; msgEl.textContent=m2;
     console.log("Filas sin cotizacion completa:",res.sinCotiz);
@@ -838,13 +931,14 @@ function aplicarDatos(rows){
     const file=ev.target.files[0];if(!file)return;
     msg.textContent="Leyendo "+file.name+"\u2026";msg.className="updmsg";
     const rd=new FileReader();
-    rd.onload=e=>{
+    rd.onload=async e=>{
       try{
         const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array",cellDates:true});
         const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true});
         const hd=(""+(rows[0]&&rows[0][1]||"")).toLowerCase();
         if(!(hd.includes("auxiliar")||hd.includes("tipo"))){msg.textContent="\u2717 El archivo no parece un export de Tango (no encuentro las columnas esperadas).";msg.className="updmsg err";return;}
         const res=aplicarDatos(rows);
+        await guardarEerrEnSupabase();
         const fSel=document.getElementById("from"),tSel=document.getElementById("to");
         fSel.innerHTML="";tSel.innerHTML="";
         DATA.meses.forEach((m,i)=>{fSel.add(new Option(mesLabel(m),i));tSel.add(new Option(mesLabel(m),i));});
@@ -853,12 +947,21 @@ function aplicarDatos(rows){
         const A=new Set(["A) VENTA","A) CMV VENTA"]);let eA=0;DATA.grupos.forEach(g=>{if(A.has(g.grupo))for(const y in g.serie)eA+=g.serie[y][0];});
         let cmv=0;PROJ_DATA.aperturas.forEach(a=>{for(const m in a.mov)for(const y in a.mov[m])cmv+=a.mov[m][y][0];});
         const dif=Math.abs(eA-cmv),ok=dif<Math.max(1,Math.abs(eA)*0.001);
-        msg.textContent="\u2713 Actualizado: "+PROJ_DATA.aperturas.length+" proyectos, presupuesto al día"+(res.added?" (+"+res.added+" líneas nuevas s/resp.)":"")+(res.outOfRange&&res.outOfRange.length?" ⚠ meses fuera de rango: "+res.outOfRange.join(", "):"")+". Cuadre A vs CMV: $"+fmt(dif)+(ok?" \u2014 cuadra.":" \u2014 revisar diferencia.");
+        msg.textContent="\u2713 Actualizado: "+PROJ_DATA.aperturas.length+" proyectos, presupuesto al día"+(res.added?" (+"+res.added+" líneas nuevas s/resp.)":"")+(res.outOfRange&&res.outOfRange.length?" ⚠ meses fuera de rango: "+res.outOfRange.join(", "):"")+". Cuadre A vs CMV: $"+fmt(dif)+(ok?" \u2014 cuadra.":" \u2014 revisar diferencia.")+" Guardado en Supabase.";
         msg.className="updmsg "+(ok?"ok":"err");
       }catch(err){msg.textContent="\u2717 Error al procesar: "+err.message;msg.className="updmsg err";console.error(err);}
     };
     rd.onerror=()=>{msg.textContent="\u2717 No se pudo leer el archivo.";msg.className="updmsg err";};
     rd.readAsArrayBuffer(file);ev.target.value="";
   });
+})();
+
+(async function start(){
+  const ok=await initAuth();
+  if(!ok) return; // pantalla de login ya mostrada
+  await cargarEerrDesdeSupabase();
+  initEerrUI();
+  initPto();
+  initCMV();
 })();
 </script></body></html>
