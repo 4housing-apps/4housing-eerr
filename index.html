@@ -654,9 +654,14 @@ function tcBillFor(dstr,origen,cotiz){
   return null;
 }
 function axiFactorFor(ym){
-  const idxMes=HIST_CAMBIARIO.facpce[ym]; if(idxMes==null) return null;
+  const idxMes=HIST_CAMBIARIO.facpce[ym];
   const idxAncla=HIST_CAMBIARIO.facpce[HIST_CAMBIARIO.facpce_last];
-  return idxAncla/idxMes;
+  if(idxMes!=null) return idxAncla/idxMes;
+  // Mes posterior al ultimo indice FACPCE publicado (todavia no salio): factor 1 (sin ajuste
+  // adicional), en vez de dejarlo en 0/blanco. Apenas se publique el indice real y se cargue
+  // en Supabase, este mes deja de caer aca y usa su valor real.
+  if(HIST_CAMBIARIO.facpce_last && ym>HIST_CAMBIARIO.facpce_last) return 1;
+  return null;
 }
 function parseFechaCell(f){
   if(f instanceof Date) return f;
