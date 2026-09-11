@@ -716,7 +716,7 @@ async function onCargarInformeCrudo(file){
     const nIgnor=Object.values(res.gruposIgnorados).reduce((s,v)=>s+v,0);
     const nPend=res.sinCotiz.length;
     let m2=`OK: EERR actualizado, ${res.meses.length} meses del informe (${res.meses[0]} a ${res.meses[res.meses.length-1]}).`;
-    m2+= dicOk ? ` Diccionario de cotizaciones (Oficial/Billete/FACPCE) tomado de Supabase, actualizado hasta ${HIST_CAMBIARIO.ofic_last||"?"}.` : " ⚠ No se pudo leer el diccionario de Supabase (revisa conexion o que las tablas usd_diario_oficial/idx_facpce ya existan) — se usó el histórico embebido como respaldo, puede estar desactualizado.";
+    m2+= dicOk ? ` Diccionario tomado de Supabase: USD Oficial hasta ${HIST_CAMBIARIO.ofic_last||"?"}, USD Billete hasta ${HIST_CAMBIARIO.bill_last||"?"}, FACPCE hasta ${HIST_CAMBIARIO.facpce_last||"?"}.` : " ⚠ No se pudo leer el diccionario de Supabase (revisa conexion o que las tablas usd_diario_oficial/idx_facpce ya existan) — se usó el histórico embebido como respaldo, puede estar desactualizado.";
     if(LIVE_TC.ofic) m2+=` Cotizacion en vivo obtenida de dolarapi.com (${LIVE_TC.fecha||"hoy"}).`; else m2+=" No se pudo conectar a dolarapi.com (revisa conexion) — fechas fuera del historico quedan sin USD/AXI.";
     if(nPend) m2+=` ⚠ ${nPend} filas sin cotizacion completa (fechas sin historico ni dato en vivo) — no se inventaron valores, quedaron en 0 para esas filas.`;
     if(nIgnor) m2+=` ${nIgnor} filas con grupo no reconocido, ignoradas: ${Object.keys(res.gruposIgnorados).join(", ")}.`;
