@@ -355,7 +355,7 @@ async function loadOverrides(){
   CONFIG_PTO.forEach(c=>OVERRIDES[c.key]={base:c.base,pto:c.pto_sugerido});
   try{const r=await window.storage.get("pto_estructura_overrides_v2");if(r&&r.value)Object.assign(OVERRIDES,JSON.parse(r.value));}catch(e){}
 }
-async function saveOverrides(){try{await window.storage.set("pto_estructura_overrides_v2",JSON.stringify(OVERRIDES));}catch(e){}}
+async function saveOverrides(){try{await window.storage.set("pto_estructura_overrides_v2",JSON.stringify(OVERRIDES));}catch(e){} guardarClave('OVERRIDES',OVERRIDES);}
 function pMonths(){const s=new Set();CONFIG_PTO.forEach(c=>Object.keys(c.serie).forEach(m=>s.add(m)));return[...s].sort();}
 async function initPto(){
   document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>showView(t.dataset.v)));
@@ -465,7 +465,7 @@ const SIGN=-1; /* ingresos +, gastos - (invierte signo contable) */
 let editableCMV=false;
 const PROJ_OV={proj:{},row:{}};
 async function loadProjOv(){try{const r=await window.storage.get("cmv_overrides");if(r&&r.value){const o=JSON.parse(r.value);PROJ_OV.proj=o.proj||{};PROJ_OV.row=o.row||{};}}catch(e){}}
-async function saveProjOv(){try{await window.storage.set("cmv_overrides",JSON.stringify(PROJ_OV));}catch(e){}}
+async function saveProjOv(){try{await window.storage.set("cmv_overrides",JSON.stringify(PROJ_OV));}catch(e){} guardarClave('PROJ_OV',PROJ_OV);}
 function pjOv(c){return PROJ_OV.proj[c]||(PROJ_OV.proj[c]={});}
 function rwOv(c,m){const k=c+"|"+m;return PROJ_OV.row[k]||(PROJ_OV.row[k]={});}
 function effProj(cod){const f=CMV_CARGA.periodos[cod]||{},o=PROJ_OV.proj[cod]||{};return{inicio:o.inicio!==undefined?o.inicio:(f.inicio||""),cierre:o.cierre!==undefined?o.cierre:(f.cierre||""),inv:o.inv!==undefined?o.inv:!!f.inv};}
@@ -616,57 +616,56 @@ async function initAuth(){
   return false;
 }
 
-/* ===== Persistencia del EERR en Supabase (tabla eerr_datos) =====
-   Antes, el informe cargado se perdia al cerrar la pestana y habia que subirlo de nuevo cada
-   vez. Ahora, despues de cada carga exitosa se guarda en Supabase, y al abrir la app (ya
-   logueada) se trae lo ultimo guardado en vez de arrancar siempre del historico de muestra. */
+/* ===== Persistencia en Supabase (tabla eerr_estado, clave/valor en JSON) =====
+   Antes, todo lo cargado/editado se perdia al cerrar la pestana. Ahora se guarda una copia
+   de cada estructura (Estado de Resultados, Presupuesto, Proyectos-CMV y sus ediciones
+   manuales) bajo su propia clave, y al abrir la app (ya logueada) se recupera todo junto.
+   Cualquiera de los dos botones de carga guarda TODO, no solo lo que ese archivo toca --
+   asi ninguna pestana queda desactualizada respecto de las demas. */
 async function authToken(){
   try{const {data:{session}}=await sbClient.auth.getSession(); return (session&&session.access_token)||SB_KEY;}
   catch(e){return SB_KEY;}
 }
-async function guardarEerrEnSupabase(){
+async function guardarClave(clave,valor){
   if(!sbClient) return;
   const token=await authToken();
-  const filas=[];
-  DATA.grupos.forEach(g=>Object.keys(g.serie).forEach(periodo=>{
-    const[ars,usdOfic,usdBill,axi]=g.serie[periodo];
-    filas.push({grupo:g.grupo,movim:g.movim,periodo,ars:ars||0,usd_ofic:usdOfic||0,usd_bill:usdBill||0,axi:axi||0});
-  }));
-  const CH=500;
-  for(let i=0;i<filas.length;i+=CH){
-    const chunk=filas.slice(i,i+CH);
-    try{
-      const res=await fetch(SB_REST+'/eerr_datos',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(chunk)});
-      if(!res.ok) throw new Error('Supabase '+res.status+': '+await res.text());
-    }catch(e){ console.warn('No se pudo guardar el EERR en Supabase (la tabla eerr_datos existe?):',e); return; }
-  }
+  try{
+    const res=await fetch(SB_REST+'/eerr_estado',{method:'POST',headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({clave,valor,actualizado_en:new Date().toISOString()})});
+    if(!res.ok) throw new Error('Supabase '+res.status+': '+await res.text());
+  }catch(e){ console.warn('No se pudo guardar "'+clave+'" en Supabase (existe la tabla eerr_estado?):',e); }
 }
-async function cargarEerrDesdeSupabase(){
-  if(!sbClient) return false;
+async function cargarClave(clave){
+  if(!sbClient) return null;
   try{
     const token=await authToken();
-    let all=[],offset=0;
-    for(let i=0;i<50;i++){
-      const res=await fetch(SB_REST+'/eerr_datos?select=*&limit=1000&offset='+offset,{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}});
-      if(!res.ok) throw new Error('Supabase '+res.status);
-      const chunk=await res.json();
-      if(!chunk||!chunk.length) break;
-      all=all.concat(chunk);
-      if(chunk.length<1000) break;
-      offset+=1000;
-    }
-    if(!all.length) return false; // todavia no hay nada guardado: se queda con el historico de muestra embebido
-    const byKey={};
-    all.forEach(r=>{
-      const k=r.grupo+"␟"+r.movim;
-      if(!byKey[k]) byKey[k]={};
-      byKey[k][r.periodo]=[+r.ars||0,+r.usd_ofic||0,+r.usd_bill||0,+r.axi||0];
-    });
-    const grupos=Object.keys(byKey).map(k=>{const[grupo,movim]=k.split("␟");return{grupo,movim,serie:byKey[k]};});
-    const mesesSet=new Set(); grupos.forEach(g=>Object.keys(g.serie).forEach(m=>mesesSet.add(m)));
-    DATA.grupos=grupos; DATA.meses=[...mesesSet].sort();
-    return true;
-  }catch(e){ console.warn('No se pudo leer el EERR guardado en Supabase, sigue con el historico de muestra embebido:',e); return false; }
+    const res=await fetch(SB_REST+'/eerr_estado?select=valor&clave=eq.'+encodeURIComponent(clave),{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}});
+    if(!res.ok) throw new Error('Supabase '+res.status);
+    const rows=await res.json();
+    return rows&&rows.length?rows[0].valor:null;
+  }catch(e){ console.warn('No se pudo leer "'+clave+'" de Supabase:',e); return null; }
+}
+async function guardarTodoEnSupabase(){
+  await Promise.all([
+    guardarClave('DATA',{grupos:DATA.grupos,meses:DATA.meses}),
+    guardarClave('CONFIG_PTO',CONFIG_PTO),
+    guardarClave('PROJ_DATA',PROJ_DATA),
+    guardarClave('OVERRIDES',OVERRIDES),
+    guardarClave('PROJ_OV',PROJ_OV),
+  ]);
+}
+window.guardarTodoEnSupabase=guardarTodoEnSupabase;
+async function cargarTodoDesdeSupabase(){
+  if(!sbClient) return false;
+  const [d,cp,pd,ov,pov]=await Promise.all([
+    cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV')
+  ]);
+  let hubo=false;
+  if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
+  if(cp&&cp.length){ CONFIG_PTO.length=0; cp.forEach(c=>CONFIG_PTO.push(c)); hubo=true; }
+  if(pd){ Object.assign(PROJ_DATA,pd); hubo=true; }
+  if(ov){ Object.assign(OVERRIDES,ov); hubo=true; }
+  if(pov){ PROJ_OV.proj=pov.proj||{}; PROJ_OV.row=pov.row||{}; hubo=true; }
+  return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
 const BILL_CORTE_PROMEDIO='2026-09-01'; // desde esta fecha, USD Billete pasa a promedio compra/venta
@@ -811,7 +810,7 @@ async function onCargarInformeCrudo(file){
     const res=parseRawLedgerEERR(rows);
     mergeEERRIntoData(res);
     msgEl.textContent="Guardando en Supabase...";
-    await guardarEerrEnSupabase();
+    await guardarTodoEnSupabase();
     const f=document.getElementById("from"),t=document.getElementById("to");
     f.innerHTML="";t.innerHTML="";
     DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
@@ -938,7 +937,7 @@ function aplicarDatos(rows){
         const hd=(""+(rows[0]&&rows[0][1]||"")).toLowerCase();
         if(!(hd.includes("auxiliar")||hd.includes("tipo"))){msg.textContent="\u2717 El archivo no parece un export de Tango (no encuentro las columnas esperadas).";msg.className="updmsg err";return;}
         const res=aplicarDatos(rows);
-        await guardarEerrEnSupabase();
+        await guardarTodoEnSupabase();
         const fSel=document.getElementById("from"),tSel=document.getElementById("to");
         fSel.innerHTML="";tSel.innerHTML="";
         DATA.meses.forEach((m,i)=>{fSel.add(new Option(mesLabel(m),i));tSel.add(new Option(mesLabel(m),i));});
@@ -959,7 +958,7 @@ function aplicarDatos(rows){
 (async function start(){
   const ok=await initAuth();
   if(!ok) return; // pantalla de login ya mostrada
-  await cargarEerrDesdeSupabase();
+  await cargarTodoDesdeSupabase();
   initEerrUI();
   initPto();
   initCMV();
