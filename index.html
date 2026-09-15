@@ -175,6 +175,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <button class="tab active" data-v="eerr">Estado de Resultados</button>
       <button class="tab" data-v="pto">Presupuesto · Estructura</button>
       <button class="tab" data-v="cmv">Proyectos · CMV</button>
+      <button class="tab" data-v="proy">Control Proyectos</button>
     </nav>
   </div>
   <div class="foot-user">Micaela Seoane</div>
@@ -238,6 +239,28 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
     <div class="table-wrap pto-wrap"><table id="cmvTabla"></table></div>
     <div class="foot" id="cmvFoot"></div>
   </div>
+
+<div id="view-proy" style="display:none">
+  <div class="controls">
+    <div class="ctl"><label for="pyProy">Proyecto</label><select id="pyProy"></select></div>
+    <div class="ctl"><label for="pyCur">Moneda</label><select id="pyCur">
+      <option value="0">Pesos (ARS)</option><option value="1">USD Oficial</option>
+      <option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
+    <div class="ctl"><label for="pyDesde">Desde</label><select id="pyDesde"></select></div>
+    <div class="ctl"><label for="pyHasta">Hasta</label><select id="pyHasta"></select></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="pyCsv">Descargar Excel</button></div>
+  </div>
+  <div class="updbar">
+    <button class="btn updbtn" id="pyOcBtn" style="background:#3d5a80">⟳ Cargar OC Emitidas</button><input type="file" id="pyOcFile" accept=".xlsx" style="display:none">
+    <button class="btn updbtn" id="pyPfBtn" style="background:#3d5a80">⟳ Cargar OC Pend. de Facturar</button><input type="file" id="pyPfFile" accept=".xlsx" style="display:none">
+    <span id="pyMsg" class="updmsg">La Contabilidad se toma sola del informe crudo de Tango que subís en "Estado de Resultados". Acá solo hace falta subir OC Emitidas y OC Pendientes de Facturar.</span>
+  </div>
+  <div class="kpis" id="pyKpis"></div>
+  <div id="pyManual" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
+  <div class="table-wrap eerr-wrap"><table id="pyTabla"></table></div>
+  <div id="pyControl" class="cmvctrl"></div>
+  <div class="foot" id="pyFoot"></div>
+</div>
   </div>
 </div></div>
 
@@ -330,7 +353,7 @@ function renderCharts(pg,meses){
 }
 
 /* ===== tabs ===== */
-function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));}
+function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));}
 
 /* ===== Presupuesto ===== */
 let editable=false;
@@ -651,13 +674,18 @@ async function guardarTodoEnSupabase(){
     guardarClave('PROJ_DATA',PROJ_DATA),
     guardarClave('OVERRIDES',OVERRIDES),
     guardarClave('PROJ_OV',PROJ_OV),
+    guardarClave('PROY_CTRL',PROY_CTRL),
+    guardarClave('PROY_CTRL_OC',PROY_CTRL_OC),
+    guardarClave('PROY_CTRL_PF',PROY_CTRL_PF),
+    guardarClave('PROY_CTRL_MANUAL',PROY_CTRL_MANUAL),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov]=await Promise.all([
-    cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV')
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman]=await Promise.all([
+    cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
+    cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -665,6 +693,10 @@ async function cargarTodoDesdeSupabase(){
   if(pd){ Object.assign(PROJ_DATA,pd); hubo=true; }
   if(ov){ Object.assign(OVERRIDES,ov); hubo=true; }
   if(pov){ PROJ_OV.proj=pov.proj||{}; PROJ_OV.row=pov.row||{}; hubo=true; }
+  if(pc){ PROY_CTRL.meses=pc.meses||[]; PROY_CTRL.proyectos=pc.proyectos||{}; hubo=true; }
+  if(poc){ Object.assign(PROY_CTRL_OC,poc); hubo=true; }
+  if(ppf){ Object.assign(PROY_CTRL_PF,ppf); hubo=true; }
+  if(pman){ Object.assign(PROY_CTRL_MANUAL,pman); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -796,6 +828,225 @@ function mergeEERRIntoData(res){
   const grupos=Object.keys(byKey).map(k=>{const[grupo,movim]=k.split("\u241F");return{grupo,movim,serie:byKey[k]};});
   DATA.meses=meses; DATA.grupos=grupos;
 }
+
+/* ===== Control Proyectos (tipo aux "03 - INSTRUCTIVO DE FABRICACION") =====
+   Se alimenta del MISMO informe crudo de Tango que el EERR (no hace falta otro archivo para
+   Contabilidad). Reglas confirmadas con Micaela:
+     - Ingresos: Cod. cuenta que empieza con "4" (cubre notas de credito, que un signo no cubriria).
+     - Consumibles / MO 4H: por texto de la leyenda (RazonSocial) "CONSUMIBLES ..." / "MO 4H ...".
+     - Bonos: cuenta "Bono Produccion" / "Bono Montaje".
+     - Compras: Origen = "Compras" (es lo unico que se puede controlar contra OC hoy).
+     - Resto: se deja agrupado tal cual por Origen, informativo (no controlable todavia).
+   OC Emitidas y OC Pendientes de Facturar se suben aparte (no vienen del crudo de Tango). */
+const PROY_CTRL={meses:[],proyectos:{}};
+const PROY_CTRL_OC={}, PROY_CTRL_PF={}; // cod -> [ars,usdOficial,usdBillete,axi], snapshot total (no por mes)
+const PROY_CTRL_MANUAL={}; // cod -> {infra, iibbPct, gananciasPct}
+const CAT_FIJAS_GASTO=["Compras","Consumibles","MO 4H","Bonos"];
+function parseRawLedgerProyectos(rows){
+  const S=s=>(s==null?"":(""+s).trim());
+  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
+  const pagg={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r||r.length<13) continue;
+    const origen=S(r[0]), tipoAux=S(r[1]), cod=S(r[2]), desc=S(r[3]);
+    if(tipoAux!=="03 - INSTRUCTIVO DE FABRICACION") continue;
+    if(!/^(PL|IF)\d/.test(cod)) continue; // descarta buckets tipo "2) CONSUM" (son de CMV, no proyectos)
+    const leyenda=S(r[4]).toUpperCase(), cuentaCod=S(r[8]), cuentaDesc=S(r[9]).toUpperCase();
+    let cat;
+    if(cuentaCod.startsWith("4")) cat="Ingresos";
+    else if(leyenda.includes("CONSUMIBLES")) cat="Consumibles";
+    else if(leyenda.includes("MO 4H")) cat="MO 4H";
+    else if(cuentaDesc.includes("BONO PRODUCCION")||cuentaDesc.includes("BONO MONTAJE")) cat="Bonos";
+    else if(origen==="Compras") cat="Compras";
+    else cat=origen||"Otros";
+    const fecha=parseFechaCell(r[5]); if(!fecha) continue;
+    const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
+    const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
+    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
+    const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0, axi=axiF!=null?ars*axiF:0;
+    if(!pagg[cod]) pagg[cod]={desc:desc,cats:{}};
+    if(desc && desc.length>(pagg[cod].desc||"").length) pagg[cod].desc=desc;
+    if(!pagg[cod].cats[cat]) pagg[cod].cats[cat]={};
+    if(!pagg[cod].cats[cat][y]) pagg[cod].cats[cat][y]=[0,0,0,0];
+    const a=pagg[cod].cats[cat][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
+  }
+  const mesesSet=new Set(), proyectos={};
+  Object.keys(pagg).forEach(cod=>{
+    const cats={};
+    Object.keys(pagg[cod].cats).forEach(cat=>{
+      const serie={};
+      Object.keys(pagg[cod].cats[cat]).sort().forEach(y=>{serie[y]=pagg[cod].cats[cat][y].map(v=>Math.round(v*100)/100);mesesSet.add(y);});
+      cats[cat]=serie;
+    });
+    proyectos[cod]={desc:pagg[cod].desc,cats};
+  });
+  return{meses:[...mesesSet].sort(),proyectos};
+}
+function mergeProyCtrlIntoData(res){
+  const mesesSet=new Set([...PROY_CTRL.meses,...res.meses]); PROY_CTRL.meses=[...mesesSet].sort();
+  Object.keys(res.proyectos).forEach(cod=>{
+    if(!PROY_CTRL.proyectos[cod]) PROY_CTRL.proyectos[cod]={desc:res.proyectos[cod].desc,cats:{}};
+    else if(res.proyectos[cod].desc) PROY_CTRL.proyectos[cod].desc=res.proyectos[cod].desc;
+    const dst=PROY_CTRL.proyectos[cod].cats, src=res.proyectos[cod].cats;
+    Object.keys(src).forEach(cat=>{ if(!dst[cat])dst[cat]={}; Object.assign(dst[cat],src[cat]); });
+  });
+}
+function convertirMontoOC(fecha,ars){
+  if(!fecha) return [ars,0,0,0];
+  const dstr=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0")+"-"+String(fecha.getUTCDate()).padStart(2,"0");
+  const y=dstr.slice(0,7);
+  const tcOfic=tcOficFor(dstr,"",ars,0), tcBill=tcBillFor(dstr,"",0), axiF=axiFactorFor(y);
+  return [ars, tcOfic?ars/tcOfic:0, tcBill?ars/tcBill:0, axiF!=null?ars*axiF:0];
+}
+function parseOCEmitidas(rows){
+  const S=s=>(s==null?"":(""+s).trim());
+  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
+  const header=(rows[0]||[]).map(S);
+  const idxDesc=header.indexOf("Descripci\u00F3n Clasificaci\u00F3n (Rengl\u00F3n)");
+  const idxTotal=header.indexOf("Total");
+  const idxFecha=header.indexOf("Fecha de generaci\u00F3n");
+  if(idxDesc<0||idxTotal<0) throw new Error('No encuentro las columnas "Descripci\u00F3n Clasificaci\u00F3n (Rengl\u00F3n)" y "Total" en el archivo.');
+  const agg={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const m=S(r[idxDesc]).match(/^(PL|IF)\d+/); if(!m) continue;
+    const cod=m[0], v=convertirMontoOC(idxFecha>=0?parseFechaCell(r[idxFecha]):null,N(r[idxTotal]));
+    if(!agg[cod]) agg[cod]=[0,0,0,0];
+    for(let k=0;k<4;k++) agg[cod][k]+=v[k];
+  }
+  return agg;
+}
+function parseOCPendFacturar(rows){
+  const S=s=>(s==null?"":(""+s).trim());
+  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
+  const header=(rows[0]||[]).map(S);
+  const idxCod=header.indexOf("C\u00F3d. clasificaci\u00F3n (Comprobante)");
+  const idxPend=header.indexOf("Pendiente de facturar sin impuestos");
+  const idxFecha=header.indexOf("Fecha de ingreso");
+  if(idxCod<0||idxPend<0) throw new Error('No encuentro las columnas "C\u00F3d. clasificaci\u00F3n (Comprobante)" y "Pendiente de facturar sin impuestos" en el archivo.');
+  const agg={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const cod=S(r[idxCod]); if(!/^(PL|IF)\d/.test(cod)) continue;
+    const v=convertirMontoOC(idxFecha>=0?parseFechaCell(r[idxFecha]):null,N(r[idxPend]));
+    if(!agg[cod]) agg[cod]=[0,0,0,0];
+    for(let k=0;k<4;k++) agg[cod][k]+=v[k];
+  }
+  return agg;
+}
+function initProy(){
+  const sel=document.getElementById("pyProy"); if(!sel) return;
+  const curSel=sel.value;
+  sel.innerHTML='<option value="__ALL__">Todos los proyectos</option>';
+  Object.keys(PROY_CTRL.proyectos).sort().forEach(cod=>sel.add(new Option(PROY_CTRL.proyectos[cod].desc||cod,cod)));
+  if(curSel && [...sel.options].some(o=>o.value===curSel)) sel.value=curSel;
+  const d=document.getElementById("pyDesde"),h=document.getElementById("pyHasta");
+  d.innerHTML="";h.innerHTML="";
+  PROY_CTRL.meses.forEach((m,i)=>{d.add(new Option(mesLabel(m),i));h.add(new Option(mesLabel(m),i));});
+  if(PROY_CTRL.meses.length){ d.value=0; h.value=PROY_CTRL.meses.length-1; }
+  if(!initProy._wired){
+    initProy._wired=true;
+    ["pyProy","pyCur","pyDesde","pyHasta"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderProyManual();renderProy();}));
+    document.getElementById("pyCsv").addEventListener("click",()=>exportTablaGen("pyTabla","control_proyectos"));
+  }
+  renderProyManual();
+  renderProy();
+}
+function renderProyManual(){
+  const box=document.getElementById("pyManual"); if(!box) return;
+  const cod=document.getElementById("pyProy").value;
+  if(!cod || cod==="__ALL__"){ box.innerHTML='<span class="note">Infraestructura / IIBB / Ganancias se definen por proyecto: eleg\u00ED uno para cargarlos.</span>'; return; }
+  const mn=PROY_CTRL_MANUAL[cod]||(PROY_CTRL_MANUAL[cod]={infra:0,iibbPct:0,gananciasPct:0});
+  box.innerHTML=`<span class="ctl"><label>Infraestructura ($, \u00FAnico)</label><input id="pyInfra" class="txt" style="width:150px" value="${fmt(mn.infra||0)}"></span>
+    <span class="ctl"><label>IIBB (% s/ Ingresos)</label><input id="pyIibb" class="txt" style="width:70px" value="${mn.iibbPct||0}"></span>
+    <span class="ctl"><label>Ganancias (% s/ Ingresos)</label><input id="pyGan" class="txt" style="width:70px" value="${mn.gananciasPct||0}"></span>
+    <button class="btn" id="pyGuardarManual">Guardar</button>`;
+  document.getElementById("pyGuardarManual").addEventListener("click",async()=>{
+    mn.infra=parseFloat(String(document.getElementById("pyInfra").value).replace(/\./g,"").replace(",","."))||0;
+    mn.iibbPct=parseFloat(String(document.getElementById("pyIibb").value).replace(",","."))||0;
+    mn.gananciasPct=parseFloat(String(document.getElementById("pyGan").value).replace(",","."))||0;
+    await guardarClave("PROY_CTRL_MANUAL",PROY_CTRL_MANUAL);
+    renderProy();
+  });
+}
+function renderProy(){
+  const tabla=document.getElementById("pyTabla"); if(!tabla) return;
+  if(!PROY_CTRL.meses.length){
+    tabla.innerHTML=""; document.getElementById("pyKpis").innerHTML=""; document.getElementById("pyControl").innerHTML="";
+    document.getElementById("pyFoot").innerHTML='Todav\u00EDa no hay datos: sub\u00ED el informe crudo de Tango en la pesta\u00F1a "Estado de Resultados" (incluye las filas 03 - INSTRUCTIVO DE FABRICACION que alimentan esta pesta\u00F1a).';
+    return;
+  }
+  const codSel=document.getElementById("pyProy").value||"__ALL__";
+  const cur=+document.getElementById("pyCur").value;
+  const dSel=document.getElementById("pyDesde"), hSel=document.getElementById("pyHasta");
+  const i0=+dSel.value||0, i1=hSel.value===""?PROY_CTRL.meses.length-1:+hSel.value;
+  const meses=PROY_CTRL.meses.slice(i0,i1+1);
+  const cods=codSel==="__ALL__"?Object.keys(PROY_CTRL.proyectos):[codSel];
+
+  const catSerie={};
+  cods.forEach(c=>{
+    const pr=PROY_CTRL.proyectos[c]; if(!pr) return;
+    Object.keys(pr.cats).forEach(cat=>{
+      if(!catSerie[cat]) catSerie[cat]={};
+      meses.forEach(m=>{catSerie[cat][m]=(catSerie[cat][m]||0)+((pr.cats[cat][m]||[0,0,0,0])[cur]||0);});
+    });
+  });
+  const ingresosSerie=catSerie["Ingresos"]||{};
+  const ingresosTot=meses.reduce((s,m)=>s+(ingresosSerie[m]||0),0);
+  const otrasCats=Object.keys(catSerie).filter(c=>c!=="Ingresos"&&!CAT_FIJAS_GASTO.includes(c)).sort();
+  const ordenGasto=[...CAT_FIJAS_GASTO.filter(c=>catSerie[c]),...otrasCats];
+
+  const pendFcTot=cods.reduce((s,c)=>s+((PROY_CTRL_PF[c]||[0,0,0,0])[cur]||0),0);
+
+  const ingresosArsProy=c=>{const pr=PROY_CTRL.proyectos[c]; if(!pr||!pr.cats["Ingresos"]) return 0; return Object.values(pr.cats["Ingresos"]).reduce((s,v)=>s+v[0],0);};
+  const ingresosCurProy=c=>{const pr=PROY_CTRL.proyectos[c]; if(!pr||!pr.cats["Ingresos"]) return 0; return Object.values(pr.cats["Ingresos"]).reduce((s,v)=>s+v[cur],0);};
+  let infraTot=0,iibbTot=0,ganTot=0;
+  cods.forEach(c=>{
+    const mn=PROY_CTRL_MANUAL[c]||{}, ingArs=Math.abs(ingresosArsProy(c));
+    const factor=ingresosArsProy(c)?(ingresosCurProy(c)/ingresosArsProy(c)):(cur===0?1:0);
+    infraTot+=(mn.infra||0)*factor;
+    iibbTot+=ingArs*(mn.iibbPct||0)/100*factor;
+    ganTot+=ingArs*(mn.gananciasPct||0)/100*factor;
+  });
+
+  const gastosCrudoTot=ordenGasto.reduce((s,c)=>s+meses.reduce((s2,m)=>s2+(catSerie[c][m]||0),0),0);
+  const gastosTotal=gastosCrudoTot+pendFcTot+infraTot+iibbTot+ganTot;
+  const resultado=ingresosTot+gastosTotal;
+
+  const head=`<thead><tr><th>Concepto</th>${meses.map(m=>`<th>${mesLabel(m)}</th>`).join("")}<th>Total per\u00EDodo</th></tr></thead>`;
+  let rows="";
+  rows+=fila("Ingresos facturados","","",ingresosSerie,meses,ingresosTot,"subtotal");
+  rows+=`<tr class="section"><td colspan="${meses.length+2}"><span class="seclbl">Gastos</span></td></tr>`;
+  ordenGasto.forEach(c=>{rows+=fila(c,"","",catSerie[c],meses,meses.reduce((s,m)=>s+(catSerie[c][m]||0),0));});
+  if(pendFcTot) rows+=fila("Pend. de Facturar (OC, devengado)","","",{},meses,pendFcTot);
+  if(infraTot) rows+=fila("Infraestructura (estimado)","","",{},meses,infraTot);
+  if(iibbTot) rows+=fila("IIBB (estimado)","","",{},meses,iibbTot);
+  if(ganTot) rows+=fila("Ganancias (estimado)","","",{},meses,ganTot);
+  rows+=fila("Subtotal Gastos","","",{},meses,gastosTotal,"subtotal");
+  rows+=fila("Resultado","","",{},meses,resultado,"result");
+  tabla.innerHTML=head+"<tbody>"+rows+"</tbody>";
+
+  document.getElementById("pyKpis").innerHTML=[["Ingresos facturados",ingresosTot],["Gastos totales",gastosTotal],["Resultado",resultado]]
+    .map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="color:${c[1]>=0?"var(--cost)":"var(--income)"}">$ ${fmtM(c[1])}</div></div>`).join("");
+
+  const ocTot=cods.reduce((s,c)=>s+((PROY_CTRL_OC[c]||[0,0,0,0])[0]||0),0);
+  const pfArs=cods.reduce((s,c)=>s+((PROY_CTRL_PF[c]||[0,0,0,0])[0]||0),0);
+  const comprasArs=cods.reduce((s,c)=>{const pr=PROY_CTRL.proyectos[c]; if(!pr||!pr.cats["Compras"]) return s; return s+Object.values(pr.cats["Compras"]).reduce((s2,v)=>s2+v[0],0);},0);
+  const comprometido=ocTot-pfArs, diff=comprometido-comprasArs;
+  const ctrlEl=document.getElementById("pyControl");
+  ctrlEl.innerHTML=(ocTot||pfArs||comprasArs)?`
+    <div class="cc-h">Control de compras (OC) \u00B7 acumulado total en ARS, no depende del rango de meses ni de la moneda elegidos arriba</div>
+    <div class="cc-grid">
+      <div class="cc-cell"><span>OC Emitidas \u2212 Pend. de Facturar</span><b>${fmt(comprometido)}</b></div>
+      <div class="cc-cell"><span>Compras contabilizadas (Tango)</span><b>${fmt(comprasArs)}</b></div>
+      <div class="cc-cell ${Math.abs(diff)<Math.max(1,Math.abs(comprasArs)*0.01)?"cc-ok":"cc-warn"}"><span>Diferencia</span><b>${fmt(diff)}</b></div>
+    </div>
+    <div class="cc-note">Solo el m\u00F3dulo Compras se controla contra \u00D3rdenes de Compra; el resto de las categor\u00EDas es informativo (no hay forma de controlarlo hoy).</div>`
+    :'<span class="note">Sub\u00ED "OC Emitidas" y "OC Pendientes de Facturar" para ver el control de compras.</span>';
+
+  document.getElementById("pyFoot").innerHTML='Fuente: mismo informe crudo de Tango (filas "03 - INSTRUCTIVO DE FABRICACION"). Ingresos = cuentas contables que empiezan con 4 (cubre notas de cr\u00E9dito). Infraestructura/IIBB/Ganancias son estimaciones manuales por proyecto, convertidas a otras monedas con el tipo de cambio impl\u00EDcito de los Ingresos de ese proyecto.';
+}
 async function onCargarInformeCrudo(file){
   const msgEl=document.getElementById("updMsg");
   msgEl.className="updmsg"; msgEl.textContent="Leyendo archivo...";
@@ -809,6 +1060,8 @@ async function onCargarInformeCrudo(file){
     await fetchLiveTC();
     const res=parseRawLedgerEERR(rows);
     mergeEERRIntoData(res);
+    const resP=parseRawLedgerProyectos(rows);
+    mergeProyCtrlIntoData(resP);
     msgEl.textContent="Guardando en Supabase...";
     await guardarTodoEnSupabase();
     const f=document.getElementById("from"),t=document.getElementById("to");
@@ -816,6 +1069,7 @@ async function onCargarInformeCrudo(file){
     DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
     f.value=0;t.value=DATA.meses.length-1;
     recompute();
+    try{initProy();}catch(e){console.warn("proy:",e);}
     const nIgnor=Object.values(res.gruposIgnorados).reduce((s,v)=>s+v,0);
     const nPend=res.sinCotiz.length;
     let m2=`OK: EERR actualizado, ${res.meses.length} meses del informe (${res.meses[0]} a ${res.meses[res.meses.length-1]}).`;
@@ -824,7 +1078,8 @@ async function onCargarInformeCrudo(file){
     if(nPend) m2+=` ⚠ ${nPend} filas sin cotizacion completa (fechas sin historico ni dato en vivo) — no se inventaron valores, quedaron en 0 para esas filas.`;
     if(nIgnor) m2+=` ${nIgnor} filas con grupo no reconocido, ignoradas: ${Object.keys(res.gruposIgnorados).join(", ")}.`;
     m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
-    m2+=" Nota: Proyectos/CMV NO se actualiza con este archivo, sigue con el ultimo cargado.";
+    m2+=" Control Proyectos actualizado: "+Object.keys(resP.proyectos).length+" proyectos con movimientos en este archivo.";
+    m2+=" Nota: Proyectos/CMV (la pestana vieja, con las aperturas 2) ACOPIO/EPP/etc.) NO se actualiza con este archivo, sigue con el ultimo cargado por el otro boton.";
     msgEl.className="updmsg ok"; msgEl.textContent=m2;
     console.log("Filas sin cotizacion completa:",res.sinCotiz);
   }catch(e){
@@ -954,6 +1209,34 @@ function aplicarDatos(rows){
     rd.readAsArrayBuffer(file);ev.target.value="";
   });
 })();
+(function(){
+  const wireOc=(btnId,inpId,parseFn,destino,nombre)=>{
+    const btn=document.getElementById(btnId),inp=document.getElementById(inpId),msg=document.getElementById("pyMsg");
+    if(!btn||!inp) return;
+    btn.addEventListener("click",()=>inp.click());
+    inp.addEventListener("change",ev=>{
+      const file=ev.target.files[0]; if(!file){return;}
+      msg.className="updmsg"; msg.textContent="Leyendo "+file.name+"…";
+      const rd=new FileReader();
+      rd.onload=async e=>{
+        try{
+          const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array",cellDates:true});
+          const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true});
+          const agg=parseFn(rows);
+          for(const k in destino) delete destino[k];
+          Object.assign(destino,agg);
+          await guardarClave(destino===PROY_CTRL_OC?"PROY_CTRL_OC":"PROY_CTRL_PF",destino);
+          initProy();
+          msg.className="updmsg ok"; msg.textContent="✓ "+nombre+" actualizado: "+Object.keys(agg).length+" proyectos. Guardado en Supabase.";
+        }catch(err){ msg.className="updmsg err"; msg.textContent="✗ Error al procesar "+nombre+": "+err.message; console.error(err); }
+      };
+      rd.onerror=()=>{msg.className="updmsg err"; msg.textContent="✗ No se pudo leer el archivo.";};
+      rd.readAsArrayBuffer(file); ev.target.value="";
+    });
+  };
+  wireOc("pyOcBtn","pyOcFile",parseOCEmitidas,PROY_CTRL_OC,"OC Emitidas");
+  wireOc("pyPfBtn","pyPfFile",parseOCPendFacturar,PROY_CTRL_PF,"OC Pendientes de Facturar");
+})();
 
 (async function start(){
   const ok=await initAuth();
@@ -962,5 +1245,6 @@ function aplicarDatos(rows){
   initEerrUI();
   initPto();
   initCMV();
+  try{initProy();}catch(e){console.warn("proy:",e);}
 })();
 </script></body></html>
