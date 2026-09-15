@@ -259,6 +259,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
   <div id="pyManual" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
   <div class="table-wrap eerr-wrap"><table id="pyTabla"></table></div>
   <div id="pyControl" class="cmvctrl"></div>
+  <div id="pyDetalle" class="cmvctrl"></div>
   <div class="foot" id="pyFoot"></div>
 </div>
   </div>
@@ -865,11 +866,18 @@ function parseRawLedgerProyectos(rows){
     const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
     const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
     const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0, axi=axiF!=null?ars*axiF:0;
-    if(!pagg[cod]) pagg[cod]={desc:desc,cats:{}};
+    if(!pagg[cod]) pagg[cod]={desc:desc,cats:{},comprasProv:{}};
     if(desc && desc.length>(pagg[cod].desc||"").length) pagg[cod].desc=desc;
     if(!pagg[cod].cats[cat]) pagg[cod].cats[cat]={};
     if(!pagg[cod].cats[cat][y]) pagg[cod].cats[cat][y]=[0,0,0,0];
     const a=pagg[cod].cats[cat][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
+    if(cat==="Compras"){
+      // Para Origen=Compras, el campo Leyenda de Tango es directamente el codigo de proveedor
+      // (mismo codigo que "Cod. proveedor" en las OC) -- permite el detalle por proveedor mas abajo.
+      const prov=S(r[4]);
+      if(!pagg[cod].comprasProv[y]) pagg[cod].comprasProv[y]={};
+      pagg[cod].comprasProv[y][prov]=(pagg[cod].comprasProv[y][prov]||0)+ars;
+    }
   }
   const mesesSet=new Set(), proyectos={};
   Object.keys(pagg).forEach(cod=>{
@@ -879,17 +887,24 @@ function parseRawLedgerProyectos(rows){
       Object.keys(pagg[cod].cats[cat]).sort().forEach(y=>{serie[y]=pagg[cod].cats[cat][y].map(v=>Math.round(v*100)/100);mesesSet.add(y);});
       cats[cat]=serie;
     });
-    proyectos[cod]={desc:pagg[cod].desc,cats};
+    const comprasProv={};
+    Object.keys(pagg[cod].comprasProv).sort().forEach(y=>{
+      const o={}; for(const p in pagg[cod].comprasProv[y]) o[p]=Math.round(pagg[cod].comprasProv[y][p]*100)/100;
+      comprasProv[y]=o;
+    });
+    proyectos[cod]={desc:pagg[cod].desc,cats,comprasProv};
   });
   return{meses:[...mesesSet].sort(),proyectos};
 }
 function mergeProyCtrlIntoData(res){
   const mesesSet=new Set([...PROY_CTRL.meses,...res.meses]); PROY_CTRL.meses=[...mesesSet].sort();
   Object.keys(res.proyectos).forEach(cod=>{
-    if(!PROY_CTRL.proyectos[cod]) PROY_CTRL.proyectos[cod]={desc:res.proyectos[cod].desc,cats:{}};
+    if(!PROY_CTRL.proyectos[cod]) PROY_CTRL.proyectos[cod]={desc:res.proyectos[cod].desc,cats:{},comprasProv:{}};
     else if(res.proyectos[cod].desc) PROY_CTRL.proyectos[cod].desc=res.proyectos[cod].desc;
-    const dst=PROY_CTRL.proyectos[cod].cats, src=res.proyectos[cod].cats;
-    Object.keys(src).forEach(cat=>{ if(!dst[cat])dst[cat]={}; Object.assign(dst[cat],src[cat]); });
+    const dst=PROY_CTRL.proyectos[cod], src=res.proyectos[cod];
+    Object.keys(src.cats).forEach(cat=>{ if(!dst.cats[cat])dst.cats[cat]={}; Object.assign(dst.cats[cat],src.cats[cat]); });
+    if(!dst.comprasProv) dst.comprasProv={};
+    Object.assign(dst.comprasProv,src.comprasProv);
   });
 }
 function convertirMontoOC(fecha,ars){
@@ -906,14 +921,16 @@ function parseOCEmitidas(rows){
   const idxDesc=header.indexOf("Descripci\u00F3n Clasificaci\u00F3n (Rengl\u00F3n)");
   const idxTotal=header.indexOf("Total");
   const idxFecha=header.indexOf("Fecha de generaci\u00F3n");
+  const idxProv=header.indexOf("C\u00F3d. proveedor");
   if(idxDesc<0||idxTotal<0) throw new Error('No encuentro las columnas "Descripci\u00F3n Clasificaci\u00F3n (Rengl\u00F3n)" y "Total" en el archivo.');
   const agg={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const m=S(r[idxDesc]).match(/^(PL|IF)\d+/); if(!m) continue;
     const cod=m[0], v=convertirMontoOC(idxFecha>=0?parseFechaCell(r[idxFecha]):null,N(r[idxTotal]));
-    if(!agg[cod]) agg[cod]=[0,0,0,0];
-    for(let k=0;k<4;k++) agg[cod][k]+=v[k];
+    if(!agg[cod]) agg[cod]={tot:[0,0,0,0],prov:{}};
+    for(let k=0;k<4;k++) agg[cod].tot[k]+=v[k];
+    if(idxProv>=0){ const p=S(r[idxProv]); agg[cod].prov[p]=(agg[cod].prov[p]||0)+v[0]; }
   }
   return agg;
 }
@@ -924,14 +941,16 @@ function parseOCPendFacturar(rows){
   const idxCod=header.indexOf("C\u00F3d. clasificaci\u00F3n (Comprobante)");
   const idxPend=header.indexOf("Pendiente de facturar sin impuestos");
   const idxFecha=header.indexOf("Fecha de ingreso");
+  const idxProv=header.indexOf("C\u00F3d. proveedor");
   if(idxCod<0||idxPend<0) throw new Error('No encuentro las columnas "C\u00F3d. clasificaci\u00F3n (Comprobante)" y "Pendiente de facturar sin impuestos" en el archivo.');
   const agg={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const cod=S(r[idxCod]); if(!/^(PL|IF)\d/.test(cod)) continue;
     const v=convertirMontoOC(idxFecha>=0?parseFechaCell(r[idxFecha]):null,N(r[idxPend]));
-    if(!agg[cod]) agg[cod]=[0,0,0,0];
-    for(let k=0;k<4;k++) agg[cod][k]+=v[k];
+    if(!agg[cod]) agg[cod]={tot:[0,0,0,0],prov:{}};
+    for(let k=0;k<4;k++) agg[cod].tot[k]+=v[k];
+    if(idxProv>=0){ const p=S(r[idxProv]); agg[cod].prov[p]=(agg[cod].prov[p]||0)+v[0]; }
   }
   return agg;
 }
@@ -973,7 +992,7 @@ function renderProyManual(){
 function renderProy(){
   const tabla=document.getElementById("pyTabla"); if(!tabla) return;
   if(!PROY_CTRL.meses.length){
-    tabla.innerHTML=""; document.getElementById("pyKpis").innerHTML=""; document.getElementById("pyControl").innerHTML="";
+    tabla.innerHTML=""; document.getElementById("pyKpis").innerHTML=""; document.getElementById("pyControl").innerHTML=""; document.getElementById("pyDetalle").innerHTML="";
     document.getElementById("pyFoot").innerHTML='Todav\u00EDa no hay datos: sub\u00ED el informe crudo de Tango en la pesta\u00F1a "Estado de Resultados" (incluye las filas 03 - INSTRUCTIVO DE FABRICACION que alimentan esta pesta\u00F1a).';
     return;
   }
@@ -997,7 +1016,7 @@ function renderProy(){
   const otrasCats=Object.keys(catSerie).filter(c=>c!=="Ingresos"&&!CAT_FIJAS_GASTO.includes(c)).sort();
   const ordenGasto=[...CAT_FIJAS_GASTO.filter(c=>catSerie[c]),...otrasCats];
 
-  const pendFcTot=cods.reduce((s,c)=>s+((PROY_CTRL_PF[c]||[0,0,0,0])[cur]||0),0);
+  const pendFcTot=cods.reduce((s,c)=>s+((PROY_CTRL_PF[c]||{tot:[0,0,0,0]}).tot[cur]||0),0);
 
   const ingresosArsProy=c=>{const pr=PROY_CTRL.proyectos[c]; if(!pr||!pr.cats["Ingresos"]) return 0; return Object.values(pr.cats["Ingresos"]).reduce((s,v)=>s+v[0],0);};
   const ingresosCurProy=c=>{const pr=PROY_CTRL.proyectos[c]; if(!pr||!pr.cats["Ingresos"]) return 0; return Object.values(pr.cats["Ingresos"]).reduce((s,v)=>s+v[cur],0);};
@@ -1030,10 +1049,11 @@ function renderProy(){
   document.getElementById("pyKpis").innerHTML=[["Ingresos facturados",ingresosTot],["Gastos totales",gastosTotal],["Resultado",resultado]]
     .map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="color:${c[1]>=0?"var(--cost)":"var(--income)"}">$ ${fmtM(c[1])}</div></div>`).join("");
 
-  const ocTot=cods.reduce((s,c)=>s+((PROY_CTRL_OC[c]||[0,0,0,0])[0]||0),0);
-  const pfArs=cods.reduce((s,c)=>s+((PROY_CTRL_PF[c]||[0,0,0,0])[0]||0),0);
+  const ocTot=cods.reduce((s,c)=>s+((PROY_CTRL_OC[c]||{tot:[0,0,0,0]}).tot[0]||0),0);
+  const pfArs=cods.reduce((s,c)=>s+((PROY_CTRL_PF[c]||{tot:[0,0,0,0]}).tot[0]||0),0);
   const comprasArs=cods.reduce((s,c)=>{const pr=PROY_CTRL.proyectos[c]; if(!pr||!pr.cats["Compras"]) return s; return s+Object.values(pr.cats["Compras"]).reduce((s2,v)=>s2+v[0],0);},0);
   const comprometido=ocTot-pfArs, diff=comprometido-comprasArs;
+  const pctDif=ocTot?diff/ocTot:0; // mismo criterio que tu solapa "Dif": % = Diferencia / OC Emitidas
   const ctrlEl=document.getElementById("pyControl");
   ctrlEl.innerHTML=(ocTot||pfArs||comprasArs)?`
     <div class="cc-h">Control de compras (OC) \u00B7 acumulado total en ARS, no depende del rango de meses ni de la moneda elegidos arriba</div>
@@ -1041,11 +1061,40 @@ function renderProy(){
       <div class="cc-cell"><span>OC Emitidas \u2212 Pend. de Facturar</span><b>${fmt(comprometido)}</b></div>
       <div class="cc-cell"><span>Compras contabilizadas (Tango)</span><b>${fmt(comprasArs)}</b></div>
       <div class="cc-cell ${Math.abs(diff)<Math.max(1,Math.abs(comprasArs)*0.01)?"cc-ok":"cc-warn"}"><span>Diferencia</span><b>${fmt(diff)}</b></div>
+      <div class="cc-cell ${Math.abs(pctDif)<0.01?"cc-ok":"cc-warn"}"><span>% s/ OC Emitidas</span><b>${(pctDif*100).toFixed(2)}%</b></div>
     </div>
     <div class="cc-note">Solo el m\u00F3dulo Compras se controla contra \u00D3rdenes de Compra; el resto de las categor\u00EDas es informativo (no hay forma de controlarlo hoy).</div>`
     :'<span class="note">Sub\u00ED "OC Emitidas" y "OC Pendientes de Facturar" para ver el control de compras.</span>';
 
+  renderProyDetalle(codSel,meses);
+
   document.getElementById("pyFoot").innerHTML='Fuente: mismo informe crudo de Tango (filas "03 - INSTRUCTIVO DE FABRICACION"). Ingresos = cuentas contables que empiezan con 4 (cubre notas de cr\u00E9dito). Infraestructura/IIBB/Ganancias son estimaciones manuales por proyecto, convertidas a otras monedas con el tipo de cambio impl\u00EDcito de los Ingresos de ese proyecto.';
+}
+/* Detalle por proveedor (equivalente a tus solapas "Dif"/"td2"): compara, proveedor por proveedor,
+   lo comprometido en OC (Emitidas - Pend. de Facturar) contra lo contabilizado en Tango como Compras.
+   Para Origen=Compras, el campo Leyenda de Tango ES el codigo de proveedor (verificado contra tus
+   archivos reales), asi que el cruce es exacto, no aproximado por texto. Solo tiene sentido por
+   proyecto individual (mezclar proveedores de "Todos" los proyectos no se puede leer). */
+function renderProyDetalle(codSel,meses){
+  const box=document.getElementById("pyDetalle"); if(!box) return;
+  if(codSel==="__ALL__"){ box.innerHTML='<span class="note">El detalle por proveedor se muestra solo eligiendo un proyecto individual arriba.</span>'; return; }
+  const pr=PROY_CTRL.proyectos[codSel];
+  const comprasProv={};
+  if(pr&&pr.comprasProv) meses.forEach(m=>{const cp=pr.comprasProv[m]; if(cp) for(const p in cp) comprasProv[p]=(comprasProv[p]||0)+cp[p];});
+  const ocProv=(PROY_CTRL_OC[codSel]||{}).prov||{};
+  const pfProv=(PROY_CTRL_PF[codSel]||{}).prov||{};
+  const provs=new Set([...Object.keys(comprasProv),...Object.keys(ocProv),...Object.keys(pfProv)]);
+  if(!provs.size){ box.innerHTML='<span class="note">Todav\u00EDa no hay Compras, OC Emitidas ni Pend. de Facturar cargados para este proyecto.</span>'; return; }
+  let rows="";
+  [...provs].sort().forEach(p=>{
+    const compras=comprasProv[p]||0, oc=ocProv[p]||0, pf=pfProv[p]||0;
+    const comprometido=oc-pf, dif=comprometido-compras, pct=oc?dif/oc:(compras?-1:0);
+    const cls=Math.abs(dif)<1?"":(Math.abs(pct)<0.01?"pos":"neg");
+    rows+=`<tr><td>${p}</td><td>${fmt(compras)}</td><td>${fmt(oc)}</td><td>${fmt(pf)}</td><td>${fmt(comprometido)}</td><td class="${cls}">${fmt(dif)}</td><td class="${cls}">${(pct*100).toFixed(1)}%</td></tr>`;
+  });
+  box.innerHTML=`<div class="cc-h">Detalle por proveedor \u00B7 rango de meses elegido arriba, siempre en ARS</div>
+    <div class="table-wrap"><table><thead><tr><th>Proveedor</th><th>Compras (Tango)</th><th>OC Emitidas</th><th>Pend. Facturar</th><th>Comprometido</th><th>Diferencia</th><th>%</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="cc-note">Mismo cruce que us\u00E1s en tu Excel (solapa "Dif"): para Compras, el c\u00F3digo de proveedor sale directo del campo Leyenda de Tango. Si un proveedor no cuadra, revis\u00E1 notas de cr\u00E9dito, OCs cargadas contra otro proyecto, o comprobantes todav\u00EDa no vinculados a una OC.</div>`;
 }
 async function onCargarInformeCrudo(file){
   const msgEl=document.getElementById("updMsg");
