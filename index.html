@@ -80,6 +80,7 @@ select,.ctl input{border:1px solid var(--line);border-radius:10px;padding:9px 12
 .kpi .k-val{font-size:21px;font-weight:700;margin-top:4px;letter-spacing:-.02em;}
 .kpi .k-sub{font-size:11px;color:var(--muted);margin-top:3px;}
 .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:20px;}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;}
 .panel h3{margin:0 0 10px;font-size:14px;font-weight:700;}
 .chart-box{position:relative;height:280px;}
@@ -103,7 +104,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
 .pto-inp{width:74px;border:1px solid var(--line);border-radius:6px;padding:3px 5px;font-size:11px;text-align:right;font-variant-numeric:tabular-nums;}
 .base-sel{border:1px solid var(--line);border-radius:6px;padding:3px 4px;font-size:10px;}
 .mut{color:var(--muted);font-size:10px;}
-@media(max-width:880px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+@media(max-width:880px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}.grid3{grid-template-columns:1fr}}
 
 #pTabla{border-collapse:separate;border-spacing:0;}
 #pTabla th,#pTabla td{background:var(--card);}
@@ -272,12 +273,14 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
     <div class="ctl"><label for="dicDesde">Desde</label><input id="dicDesde" type="date"></div>
     <div class="ctl"><label for="dicHasta">Hasta</label><input id="dicHasta" type="date"></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicRefresh">⟳ Releer diccionario</button></div>
-    <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicCsvUsd">Descargar USD (Excel)</button></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicCsvOfic">Descargar Oficial (Excel)</button></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicCsvBill">Descargar Billete (Excel)</button></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicCsvIdx">Descargar índice (Excel)</button></div>
   </div>
   <div class="kpis" id="dicKpis"></div>
-  <div class="grid2">
-    <div class="panel"><h3>USD Oficial / Billete — diario</h3><div class="table-wrap eerr-wrap"><table id="dicTablaUsd"></table></div></div>
+  <div class="grid3">
+    <div class="panel"><h3>USD Oficial — diario</h3><div class="table-wrap eerr-wrap"><table id="dicTablaOfic"></table></div></div>
+    <div class="panel"><h3>USD Billete — diario</h3><div class="table-wrap eerr-wrap"><table id="dicTablaBill"></table></div></div>
     <div class="panel"><h3>Índice FACPCE (IPC Nac. empalme IPIM) — mensual</h3><div class="table-wrap eerr-wrap"><table id="dicTablaIdx"></table></div></div>
   </div>
   <div class="foot" id="dicFoot"></div>
@@ -744,22 +747,26 @@ async function cargarDiccionarioSupabase(){
       sbFetchAllPublic('idx_facpce','periodo'),
     ]);
     if(!ofic.length&&!bill.length&&!facpce.length) throw new Error('tablas vacias o inexistentes todavia');
-    const oficMap={}, billMap={}, facpceMap={};
+    const oficMap={}, billMap={}, facpceMap={}, oficRaw={}, billRaw={};
     let oficLast=null, billLast=null, facpceLast=null;
-    ofic.forEach(r=>{ if(r.venta==null) return; oficMap[r.fecha]=+r.venta; if(!oficLast||r.fecha>oficLast) oficLast=r.fecha; });
+    ofic.forEach(r=>{
+      if(r.venta==null) return; oficMap[r.fecha]=+r.venta; if(!oficLast||r.fecha>oficLast) oficLast=r.fecha;
+      oficRaw[r.fecha]={compra:r.compra!=null?+r.compra:null, venta:+r.venta};
+    });
     bill.forEach(r=>{
       const c=r.compra!=null?+r.compra:null, v=r.venta!=null?+r.venta:null;
       const usaProm=r.fecha>=BILL_CORTE_PROMEDIO;
       const val = usaProm ? ((c!=null&&v!=null)?(c+v)/2:(v!=null?v:c)) : (v!=null?v:c);
       if(val==null) return;
       billMap[r.fecha]=val; if(!billLast||r.fecha>billLast) billLast=r.fecha;
+      billRaw[r.fecha]={compra:c, venta:v};
     });
     facpce.forEach(r=>{
       if(r.valor==null) return;
       const p=String(r.periodo), ym=p.slice(0,4)+'-'+p.slice(4,6);
       facpceMap[ym]=+r.valor; if(!facpceLast||ym>facpceLast) facpceLast=ym;
     });
-    HIST_CAMBIARIO={ofic:oficMap, bill:billMap, facpce:facpceMap, ofic_last:oficLast, bill_last:billLast, facpce_last:facpceLast};
+    HIST_CAMBIARIO={ofic:oficMap, bill:billMap, facpce:facpceMap, ofic_last:oficLast, bill_last:billLast, facpce_last:facpceLast, oficRaw, billRaw};
     console.log('Diccionario cargado desde Supabase (compartido con Compras): ofic hasta '+oficLast+', bill hasta '+billLast+', FACPCE hasta '+facpceLast+'.');
     return true;
   }catch(e){
@@ -808,41 +815,50 @@ async function initDic(){
       await fetchLiveTC();
       renderDic();
     });
-    document.getElementById("dicCsvUsd").addEventListener("click",()=>exportTablaGen("dicTablaUsd","diccionario_usd"));
+    document.getElementById("dicCsvOfic").addEventListener("click",()=>exportTablaGen("dicTablaOfic","diccionario_usd_oficial"));
+    document.getElementById("dicCsvBill").addEventListener("click",()=>exportTablaGen("dicTablaBill","diccionario_usd_billete"));
     document.getElementById("dicCsvIdx").addEventListener("click",()=>exportTablaGen("dicTablaIdx","diccionario_facpce"));
   }
   renderDic();
 }
+/* Tabla Compra/Venta/Promedio para una moneda (raw=HIST_CAMBIARIO.oficRaw o .billRaw, val=HIST_CAMBIARIO.ofic o .bill
+   ya con la regla de la app aplicada -- para Oficial siempre venta; para Billete, venta hasta el corte y
+   promedio despues, ver BILL_CORTE_PROMEDIO). Promedio en la tabla es SIEMPRE compra/venta simple, para que
+   se pueda comparar contra el valor que la app efectivamente usa (columna "Usado por la app"). */
+function tablaMonedaDic(raw,val,desde,hasta){
+  const fechas=Object.keys(val||{}).sort().filter(d=>(!desde||d>=desde)&&(!hasta||d<=hasta));
+  let rows="";
+  fechas.slice().reverse().forEach(d=>{
+    const r=(raw||{})[d]||{}, c=r.compra, v=r.venta, prom=(c!=null&&v!=null)?(c+v)/2:null;
+    rows+=`<tr><td>${d}</td><td>${c!=null?fmtTC(c):"–"}</td><td>${v!=null?fmtTC(v):"–"}</td><td>${prom!=null?fmtTC(prom):"–"}</td><td><b>${fmtTC(val[d])}</b></td></tr>`;
+  });
+  return `<thead><tr><th>Fecha</th><th>Compra</th><th>Venta</th><th>Promedio</th><th>Usado por la app</th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+}
 function renderDic(){
   const desde=document.getElementById("dicDesde").value, hasta=document.getElementById("dicHasta").value;
-  const oficDates=Object.keys(HIST_CAMBIARIO.ofic||{}).sort();
-  const billDates=Object.keys(HIST_CAMBIARIO.bill||{}).sort();
-  const allDates=[...new Set([...oficDates,...billDates])].sort().filter(d=>(!desde||d>=desde)&&(!hasta||d<=hasta));
-  let rowsUsd="";
-  allDates.slice().reverse().forEach(d=>{
-    const o=HIST_CAMBIARIO.ofic[d], b=HIST_CAMBIARIO.bill[d];
-    rowsUsd+=`<tr><td>${d}</td><td>${o!=null?fmtTC(o):"–"}</td><td>${b!=null?fmtTC(b):"–"}</td></tr>`;
-  });
-  document.getElementById("dicTablaUsd").innerHTML=`<thead><tr><th>Fecha</th><th>USD Oficial</th><th>USD Billete</th></tr></thead><tbody>${rowsUsd||'<tr><td colspan="3" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+  document.getElementById("dicTablaOfic").innerHTML=tablaMonedaDic(HIST_CAMBIARIO.oficRaw,HIST_CAMBIARIO.ofic,desde,hasta);
+  document.getElementById("dicTablaBill").innerHTML=tablaMonedaDic(HIST_CAMBIARIO.billRaw,HIST_CAMBIARIO.bill,desde,hasta);
 
   const idxMeses=Object.keys(HIST_CAMBIARIO.facpce||{}).sort().filter(m=>(!desde||m>=desde.slice(0,7))&&(!hasta||m<=hasta.slice(0,7)));
+  const idxAncla=HIST_CAMBIARIO.facpce[HIST_CAMBIARIO.facpce_last];
   let rowsIdx="";
   const idxDesc=idxMeses.slice().reverse();
   idxDesc.forEach((m,i)=>{
     const v=HIST_CAMBIARIO.facpce[m], anterior=HIST_CAMBIARIO.facpce[idxDesc[i+1]];
     const varm=anterior?((v/anterior-1)*100):null;
-    rowsIdx+=`<tr><td>${m}</td><td>${fmtTC(v)}</td><td>${varm!=null?varm.toFixed(2)+"%":"–"}</td></tr>`;
+    const factorAxi=idxAncla?(idxAncla/v):null;
+    rowsIdx+=`<tr><td>${m}</td><td>${fmtTC(v)}</td><td>${varm!=null?varm.toFixed(2)+"%":"–"}</td><td><b>${factorAxi!=null?factorAxi.toFixed(6):"–"}</b></td></tr>`;
   });
-  document.getElementById("dicTablaIdx").innerHTML=`<thead><tr><th>Período</th><th>Índice</th><th>Var. mensual</th></tr></thead><tbody>${rowsIdx||'<tr><td colspan="3" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+  document.getElementById("dicTablaIdx").innerHTML=`<thead><tr><th>Período</th><th>Índice</th><th>Var. mensual</th><th>Factor AXI (ancla ÷ mes)</th></tr></thead><tbody>${rowsIdx||'<tr><td colspan="4" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
 
   document.getElementById("dicKpis").innerHTML=[
     ["USD Oficial hasta",HIST_CAMBIARIO.ofic_last||"–"],
     ["USD Billete hasta",HIST_CAMBIARIO.bill_last||"–"],
-    ["FACPCE hasta",HIST_CAMBIARIO.facpce_last||"–"],
+    ["FACPCE hasta (ancla AXI)",HIST_CAMBIARIO.facpce_last||"–"],
     ["En vivo (dolarapi.com)",LIVE_TC.ofic!=null?("Ofic $"+fmtTC(LIVE_TC.ofic)+" · Bill $"+fmtTC(LIVE_TC.bill)):"no disponible"]
   ].map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="font-size:15px">${c[1]}</div></div>`).join("");
 
-  document.getElementById("dicFoot").innerHTML='Mismo diccionario compartido con Compras (Supabase): USD Oficial y Billete siempre a valor <b>venta</b> (Billete pasa a promedio compra/venta desde el '+BILL_CORTE_PROMEDIO+'). FACPCE es el índice que se usa para el ajuste por inflación (AXI), sin rezago.';
+  document.getElementById("dicFoot").innerHTML='Mismo diccionario compartido con Compras (Supabase). "Usado por la app": Oficial siempre toma <b>venta</b>; Billete toma <b>venta</b> hasta el '+BILL_CORTE_PROMEDIO+' y <b>promedio</b> compra/venta desde ahí. El "Factor AXI" es exactamente el que aplica la app para ajustar por inflación: índice del último mes publicado (ancla, hoy '+(HIST_CAMBIARIO.facpce_last||"?")+') dividido el índice de cada mes — sin rezago.';
 }
 function tcOficFor(dstr,origen,ars,ext){
   if(origen==="Ventas"&&ext) return ars/ext;
