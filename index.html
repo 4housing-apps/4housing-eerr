@@ -1101,14 +1101,25 @@ function parseRawLedgerCMV(rows){
 const BUCKETS_ORDER_DEFAULT=["2) ACOPIO","2) EPP","2) CONSUM","2) GAS","2) GASOIL"];
 let CMV_AVISOS=[];
 function aplicarCMVDesdeCrudo(resC){
-  PROJ_DATA.meses=resC.meses;
-  PROJ_DATA.mult={}; resC.meses.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
-  PROJ_DATA.aperturas.length=0; resC.aperturas.forEach(a=>PROJ_DATA.aperturas.push(a));
-  const codigos=new Set(resC.aperturas.filter(a=>a.es_bucket).map(a=>a.codigo));
+  // Merge mes a mes (no reemplazo total): permite cargar una base historica una vez y despues
+  // subir solo archivos de actualizacion (p.ej. desde abril/26) sin perder los meses viejos.
+  const mesesSet=new Set([...PROJ_DATA.meses,...resC.meses]);
+  PROJ_DATA.meses=[...mesesSet].sort();
+  resC.meses.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
+  const porCodigo={}; PROJ_DATA.aperturas.forEach(a=>porCodigo[a.codigo]=a);
+  resC.aperturas.forEach(a=>{
+    if(!porCodigo[a.codigo]) porCodigo[a.codigo]={codigo:a.codigo,desc:a.desc,es_bucket:a.es_bucket,mov:{}};
+    const dst=porCodigo[a.codigo];
+    dst.desc=a.desc; dst.es_bucket=a.es_bucket;
+    Object.keys(a.mov).forEach(m=>{ if(!dst.mov[m]) dst.mov[m]={}; Object.assign(dst.mov[m],a.mov[m]); });
+  });
+  PROJ_DATA.aperturas.length=0;
+  Object.keys(porCodigo).sort((x,y)=>{const bx=x.startsWith("2)"),by=y.startsWith("2)");if(bx!==by)return(bx?1:0)-(by?1:0);return x<y?-1:1;}).forEach(c=>PROJ_DATA.aperturas.push(porCodigo[c]));
+  const codigos=new Set(PROJ_DATA.aperturas.filter(a=>a.es_bucket).map(a=>a.codigo));
   const orden=BUCKETS_ORDER_DEFAULT.filter(c=>codigos.has(c));
   [...codigos].filter(c=>!orden.includes(c)).sort().forEach(c=>orden.push(c));
   PROJ_DATA.buckets_order=orden;
-  CMV_AVISOS=resC.avisos;
+  CMV_AVISOS=resC.avisos; // avisos son del ultimo archivo cargado, no se acumulan entre subidas
 }
 function renderCMVAvisos(){
   const box=document.getElementById("cmvAvisos"); if(!box) return;
