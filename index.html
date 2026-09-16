@@ -199,20 +199,23 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="tablaCsv">Descargar Excel</button></div>
   </div>
   <div class="kpis" id="kpis"></div>
-  <div class="grid2">
-    <div class="panel"><h3>Evolución mensual</h3>
-      <div class="ctl" style="margin:0 0 8px"><label for="chSel">Ver</label><select id="chSel">
-        <option value="todo">Todo (ingresos / gastos / resultado)</option>
-        <option value="margen">Margen bruto (Ventas)</option>
-        <option value="resOp">Resultado operativo</option>
-        <option value="otros">Otros resultados</option>
-        <option value="resNetoSinInv">Resultado neto (sin inversiones)</option>
-        <option value="inversiones">Inversiones</option>
-        <option value="resNeto">Resultado neto + inversiones</option>
-      </select></div>
-      <div class="chart-box"><canvas id="chMes"></canvas></div></div>
-    <div class="panel"><h3>Resultado por línea de negocio (período)</h3><div class="chart-box"><canvas id="chLinea"></canvas></div></div>
+  <div class="controls" style="margin:0 0 12px">
+    <div class="ctl"><label for="chView">Gráfico</label><select id="chView">
+      <option value="mes">Evolución mensual</option>
+      <option value="linea">Resultado por línea de negocio (período)</option>
+    </select></div>
+    <div class="ctl" id="chSelWrap"><label for="chSel">Ver</label><select id="chSel">
+      <option value="todo">Todo (ingresos / gastos / resultado)</option>
+      <option value="margen">Margen bruto (Ventas)</option>
+      <option value="resOp">Resultado operativo</option>
+      <option value="otros">Otros resultados</option>
+      <option value="resNetoSinInv">Resultado neto (sin inversiones)</option>
+      <option value="inversiones">Inversiones</option>
+      <option value="resNeto">Resultado neto + inversiones</option>
+    </select></div>
   </div>
+  <div class="panel" id="panelMes"><h3>Evolución mensual</h3><div class="chart-box" style="height:340px"><canvas id="chMes"></canvas></div></div>
+  <div class="panel" id="panelLinea" style="display:none"><h3>Resultado por línea de negocio (período)</h3><div class="chart-box" style="height:340px"><canvas id="chLinea"></canvas></div></div>
   <div class="table-wrap eerr-wrap"><table id="tabla"></table></div>
   <div class="foot" id="foot"></div>
 </div>
@@ -421,7 +424,14 @@ function renderCharts(pg,meses,bloques){
   const L=["A","B","C","D","G","I"],nom={A:"Proyectos (A)",B:"Alq. módulo (B)",C:"Alq. reefer (C)",D:"Viv. modular (D)",G:"Serv. terc. (G)",I:"Logística (I)"};
   const netos=L.map(l=>pg.filter(x=>x.letra===l).reduce((s,x)=>s+x.tot,0));
   if(chLinea)chLinea.destroy();
-  chLinea=new Chart(document.getElementById("chLinea"),{type:"bar",data:{labels:L.map(l=>nom[l]),datasets:[{label:"Resultado",data:netos,backgroundColor:netos.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:Object.assign(baseOpts(),{indexAxis:"y",plugins:{legend:{display:false}}})});
+  chLinea=new Chart(document.getElementById("chLinea"),{type:"bar",data:{labels:L.map(l=>nom[l]),datasets:[{label:"Resultado",data:netos,backgroundColor:netos.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:{
+    responsive:true,maintainAspectRatio:false,indexAxis:"y",
+    plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.label}: $ ${fmtM(c.parsed.x)}`}}},
+    scales:{
+      x:{grid:{color:"#EFE9DA"},ticks:{color:"#8B8473",font:{size:11},callback:v=>fmtM(v)}}, // eje de valor
+      y:{grid:{display:false},ticks:{color:"#8B8473",font:{size:11}}} // eje de categoría: nombres, sin formatear como número
+    }
+  }});
 }
 
 /* ===== tabs ===== */
@@ -659,6 +669,13 @@ function initEerrUI(){
   f.value=0;t.value=DATA.meses.length-1;
   ["cur","from","to"].forEach(id=>document.getElementById(id).addEventListener("change",recompute));
   document.getElementById("chSel").addEventListener("change",recompute);
+  document.getElementById("chView").addEventListener("change",()=>{
+    const v=document.getElementById("chView").value;
+    document.getElementById("panelMes").style.display=v==="mes"?"":"none";
+    document.getElementById("panelLinea").style.display=v==="linea"?"":"none";
+    document.getElementById("chSelWrap").style.display=v==="mes"?"":"none";
+    if(v==="linea"&&chLinea)chLinea.resize(); else if(chMes)chMes.resize();
+  });
   document.getElementById("tablaCsv").addEventListener("click",()=>{
     const curLbl=["pesos","usd_oficial","usd_billete","axi"][+document.getElementById("cur").value]||"tabla";
     const f=document.getElementById("from"),t=document.getElementById("to");
