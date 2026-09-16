@@ -432,9 +432,11 @@ function renderCharts(pg,meses,bloques){
       {type:"bar",label:"Gastos",data:gas.map(Math.abs),backgroundColor:"#D7A293",borderRadius:4},
       {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3,borderWidth:2}]},options:baseOpts()});
   }else{
+    // Misma línea que "Resultado" en el gráfico Todo (color oscuro sólido, sin barras) -- cada
+    // métrica del selector "Ver" ya es un neto que puede dar negativo, igual que Resultado.
     const serie=bloques[sel],data=meses.map(m=>serie[m]);
-    chMes=new Chart(document.getElementById("chMes"),{type:"bar",data:{labels,datasets:[
-      {label:CHSEL_LBL[sel],data,backgroundColor:data.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:baseOpts(false)});
+    chMes=new Chart(document.getElementById("chMes"),{type:"line",data:{labels,datasets:[
+      {label:CHSEL_LBL[sel],data,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3,borderWidth:2}]},options:baseOpts(false)});
   }
   const L=["A","B","C","D","G","I"],nom={A:"Proyectos (A)",B:"Alq. módulo (B)",C:"Alq. reefer (C)",D:"Viv. modular (D)",G:"Serv. terc. (G)",I:"Logística (I)"};
   const netos=L.map(l=>pg.filter(x=>x.letra===l).reduce((s,x)=>s+x.tot,0));
