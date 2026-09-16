@@ -400,7 +400,22 @@ function renderTabla(pg,meses,b){
   secRow("Excluidos del resultado");bloque("EXCLUIDO","c-exc");
   document.getElementById("tabla").innerHTML=head+"<tbody>"+rows+"</tbody>";
 }
-function baseOpts(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:12,font:{size:11},color:"#6C6557"}}},scales:{x:{grid:{display:false},ticks:{color:"#8B8473",font:{size:11}}},y:{grid:{color:"#EFE9DA"},ticks:{color:"#8B8473",font:{size:11},callback:v=>{const a=Math.abs(v);return a>=1e9?(v/1e9).toFixed(1)+"MM":a>=1e6?(v/1e6).toFixed(0)+"M":v;}}}}};}
+// Un solo formato de número y de tooltip para los tres gráficos (antes cada uno tenía el suyo:
+// baseOpts() formateaba distinto que chLinea, y el tooltip del eje "y" quedaba sin formatear
+// porque Object.assign pisaba plugins.tooltip en vez de combinarlo).
+function baseOpts(legend){
+  return{
+    responsive:true,maintainAspectRatio:false,
+    plugins:{
+      legend:{display:legend!==false,labels:{boxWidth:12,font:{size:11},color:"#6C6557"}},
+      tooltip:{callbacks:{label:c=>` ${c.dataset.label}: $ ${fmtM(c.parsed.y)}`}}
+    },
+    scales:{
+      x:{grid:{display:false},ticks:{color:"#8B8473",font:{size:11}}},
+      y:{grid:{color:"#EFE9DA"},ticks:{color:"#8B8473",font:{size:11},callback:v=>fmtM(v)}}
+    }
+  };
+}
 const CHSEL_LBL={margen:"Margen bruto (Ventas)",resOp:"Resultado operativo",otros:"Otros resultados",resNetoSinInv:"Resultado neto (sin inversiones)",inversiones:"Inversiones",resNeto:"Resultado neto + inversiones"};
 function renderCharts(pg,meses,bloques){
   const labels=meses.map(mesLabel), sel=document.getElementById("chSel").value;
@@ -419,7 +434,7 @@ function renderCharts(pg,meses,bloques){
   }else{
     const serie=bloques[sel],data=meses.map(m=>serie[m]);
     chMes=new Chart(document.getElementById("chMes"),{type:"bar",data:{labels,datasets:[
-      {label:CHSEL_LBL[sel],data,backgroundColor:data.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:Object.assign(baseOpts(),{plugins:{legend:{display:false}}})});
+      {label:CHSEL_LBL[sel],data,backgroundColor:data.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:baseOpts(false)});
   }
   const L=["A","B","C","D","G","I"],nom={A:"Proyectos (A)",B:"Alq. módulo (B)",C:"Alq. reefer (C)",D:"Viv. modular (D)",G:"Serv. terc. (G)",I:"Logística (I)"};
   const netos=L.map(l=>pg.filter(x=>x.letra===l).reduce((s,x)=>s+x.tot,0));
@@ -428,7 +443,7 @@ function renderCharts(pg,meses,bloques){
     responsive:true,maintainAspectRatio:false,indexAxis:"y",
     plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ${c.label}: $ ${fmtM(c.parsed.x)}`}}},
     scales:{
-      x:{grid:{color:"#EFE9DA"},ticks:{color:"#8B8473",font:{size:11},callback:v=>fmtM(v)}}, // eje de valor
+      x:{grid:{color:"#EFE9DA"},ticks:{color:"#8B8473",font:{size:11},callback:v=>fmtM(v)}}, // eje de valor, mismo formato que los otros dos gráficos
       y:{grid:{display:false},ticks:{color:"#8B8473",font:{size:11}}} // eje de categoría: nombres, sin formatear como número
     }
   }});
