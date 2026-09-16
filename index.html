@@ -176,6 +176,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <button class="tab" data-v="pto">Presupuesto · Estructura</button>
       <button class="tab" data-v="cmv">Proyectos · CMV</button>
       <button class="tab" data-v="proy">Control Proyectos</button>
+      <button class="tab" data-v="dic">Diccionario</button>
     </nav>
   </div>
   <div class="foot-user">Micaela Seoane</div>
@@ -185,7 +186,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
   <div><h1>Estado de Resultados — Gestión</h1><div class="sub">4housing · datos de Tango · prototipo</div></div>
   <span class="badge">✓ validado vs TD · AXI ancla abr-26 · sin rezago</span>
 </header>
-<div class="updbar"><button class="btn updbtn" id="updBtn">⟳ Actualizar datos</button><input type="file" id="updFile" accept=".xlsx" style="display:none"><button class="btn updbtn" id="updRawBtn" style="background:#3d5a80">⟳ Cargar informe Tango (crudo)</button><input type="file" id="updRawFile" accept=".xlsx" style="display:none"><span id="updMsg" class="updmsg">Subí el export completo de Tango (formato datos_eerr.xlsx) para todo, o el informe crudo de Consultas Externas (18 columnas) para actualizar solo el EERR con cotización automática.</span></div>
+<div class="updbar"><button class="btn updbtn" id="updRawBtn" style="background:#3d5a80">⟳ Cargar informe Tango (crudo)</button><input type="file" id="updRawFile" accept=".xlsx" style="display:none"><span id="updMsg" class="updmsg">Subí el informe crudo de Consultas Externas de Tango (18 columnas), tal cual se descarga — es el único archivo que alimenta esta app.</span></div>
 
 <div id="view-eerr">
   <div class="controls">
@@ -264,6 +265,22 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
   <div id="pyControl" class="cmvctrl"></div>
   <div id="pyDetalle" class="cmvctrl"></div>
   <div class="foot" id="pyFoot"></div>
+</div>
+
+<div id="view-dic" style="display:none">
+  <div class="controls">
+    <div class="ctl"><label for="dicDesde">Desde</label><input id="dicDesde" type="date"></div>
+    <div class="ctl"><label for="dicHasta">Hasta</label><input id="dicHasta" type="date"></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicRefresh">⟳ Releer diccionario</button></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicCsvUsd">Descargar USD (Excel)</button></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="dicCsvIdx">Descargar índice (Excel)</button></div>
+  </div>
+  <div class="kpis" id="dicKpis"></div>
+  <div class="grid2">
+    <div class="panel"><h3>USD Oficial / Billete — diario</h3><div class="table-wrap eerr-wrap"><table id="dicTablaUsd"></table></div></div>
+    <div class="panel"><h3>Índice FACPCE (IPC Nac. empalme IPIM) — mensual</h3><div class="table-wrap eerr-wrap"><table id="dicTablaIdx"></table></div></div>
+  </div>
+  <div class="foot" id="dicFoot"></div>
 </div>
   </div>
 </div></div>
@@ -357,7 +374,7 @@ function renderCharts(pg,meses){
 }
 
 /* ===== tabs ===== */
-function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));}
+function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.getElementById("view-dic").style.display=v==="dic"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));if(v==="dic")initDic();}
 
 /* ===== Presupuesto ===== */
 let editable=false;
@@ -765,6 +782,67 @@ async function fetchLiveTC(){
     LIVE_TC.ofic=ro.venta; LIVE_TC.bill=(rb.compra+rb.venta)/2; LIVE_TC.fecha=ro.fechaActualizacion||null;
     return true;
   }catch(e){ console.warn("dolarapi.com no disponible (sin internet o cambio de formato):",e); return false; }
+}
+/* ===== Diccionario (solapa de consulta): USD Oficial/Billete diario + indice FACPCE mensual =====
+   Mismos datos que usa el resto de la app (Supabase compartido con Compras), en modo lectura,
+   para poder ver que valores se estan tomando sin tener que pedirlos aparte. */
+let DIC_CARGADO=false;
+async function initDic(){
+  if(!DIC_CARGADO){
+    DIC_CARGADO=true;
+    document.getElementById("dicFoot").textContent="Cargando diccionario desde Supabase...";
+    await cargarDiccionarioSupabase();
+    await fetchLiveTC();
+    const fechasOfic=Object.keys(HIST_CAMBIARIO.ofic||{}).sort();
+    const hoyISO=new Date().toISOString().slice(0,10);
+    document.getElementById("dicDesde").value=fechasOfic.length?fechasOfic[Math.max(0,fechasOfic.length-90)]:hoyISO;
+    document.getElementById("dicHasta").value=fechasOfic.length?fechasOfic[fechasOfic.length-1]:hoyISO;
+  }
+  if(!initDic._wired){
+    initDic._wired=true;
+    ["dicDesde","dicHasta"].forEach(id=>document.getElementById(id).addEventListener("change",renderDic));
+    document.getElementById("dicRefresh").addEventListener("click",async()=>{
+      document.getElementById("dicFoot").textContent="Releyendo diccionario desde Supabase...";
+      LIVE_TC.intentado=false;
+      await cargarDiccionarioSupabase();
+      await fetchLiveTC();
+      renderDic();
+    });
+    document.getElementById("dicCsvUsd").addEventListener("click",()=>exportTablaGen("dicTablaUsd","diccionario_usd"));
+    document.getElementById("dicCsvIdx").addEventListener("click",()=>exportTablaGen("dicTablaIdx","diccionario_facpce"));
+  }
+  renderDic();
+}
+function renderDic(){
+  const desde=document.getElementById("dicDesde").value, hasta=document.getElementById("dicHasta").value;
+  const oficDates=Object.keys(HIST_CAMBIARIO.ofic||{}).sort();
+  const billDates=Object.keys(HIST_CAMBIARIO.bill||{}).sort();
+  const allDates=[...new Set([...oficDates,...billDates])].sort().filter(d=>(!desde||d>=desde)&&(!hasta||d<=hasta));
+  let rowsUsd="";
+  allDates.slice().reverse().forEach(d=>{
+    const o=HIST_CAMBIARIO.ofic[d], b=HIST_CAMBIARIO.bill[d];
+    rowsUsd+=`<tr><td>${d}</td><td>${o!=null?fmtTC(o):"–"}</td><td>${b!=null?fmtTC(b):"–"}</td></tr>`;
+  });
+  document.getElementById("dicTablaUsd").innerHTML=`<thead><tr><th>Fecha</th><th>USD Oficial</th><th>USD Billete</th></tr></thead><tbody>${rowsUsd||'<tr><td colspan="3" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+
+  const idxMeses=Object.keys(HIST_CAMBIARIO.facpce||{}).sort().filter(m=>(!desde||m>=desde.slice(0,7))&&(!hasta||m<=hasta.slice(0,7)));
+  let rowsIdx="";
+  const idxDesc=idxMeses.slice().reverse();
+  idxDesc.forEach((m,i)=>{
+    const v=HIST_CAMBIARIO.facpce[m], anterior=HIST_CAMBIARIO.facpce[idxDesc[i+1]];
+    const varm=anterior?((v/anterior-1)*100):null;
+    rowsIdx+=`<tr><td>${m}</td><td>${fmtTC(v)}</td><td>${varm!=null?varm.toFixed(2)+"%":"–"}</td></tr>`;
+  });
+  document.getElementById("dicTablaIdx").innerHTML=`<thead><tr><th>Período</th><th>Índice</th><th>Var. mensual</th></tr></thead><tbody>${rowsIdx||'<tr><td colspan="3" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+
+  document.getElementById("dicKpis").innerHTML=[
+    ["USD Oficial hasta",HIST_CAMBIARIO.ofic_last||"–"],
+    ["USD Billete hasta",HIST_CAMBIARIO.bill_last||"–"],
+    ["FACPCE hasta",HIST_CAMBIARIO.facpce_last||"–"],
+    ["En vivo (dolarapi.com)",LIVE_TC.ofic!=null?("Ofic $"+fmtTC(LIVE_TC.ofic)+" · Bill $"+fmtTC(LIVE_TC.bill)):"no disponible"]
+  ].map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="font-size:15px">${c[1]}</div></div>`).join("");
+
+  document.getElementById("dicFoot").innerHTML='Mismo diccionario compartido con Compras (Supabase): USD Oficial y Billete siempre a valor <b>venta</b> (Billete pasa a promedio compra/venta desde el '+BILL_CORTE_PROMEDIO+'). FACPCE es el índice que se usa para el ajuste por inflación (AXI), sin rezago.';
 }
 function tcOficFor(dstr,origen,ars,ext){
   if(origen==="Ventas"&&ext) return ars/ext;
@@ -1214,126 +1292,12 @@ async function onCargarInformeCrudo(file){
   }
 }
 
-/* ===== Actualizar datos desde Excel ===== */
-function rebuildData(rows){
-  const A_G=new Set(["A) VENTA","A) CMV VENTA"]);
-  const S=s=>(s==null?"":(""+s).trim());
-  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
-  const ym=f=>{
-    if(f instanceof Date)return f.getUTCFullYear()+"-"+String(f.getUTCMonth()+1).padStart(2,"0");
-    if(typeof f==="number"){const d=new Date(Math.round((f-25569)*86400000));return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0");}
-    const m=(""+f).match(/(\d{4})-(\d{2})/);return m?m[1]+"-"+m[2]:null;
-  };
-  const isMov=m=>m==="INGRESOS"||m==="GASTOS";
-  const re=/^(PL|IF)\d/;
-  const MESES=['2025-04','2025-05','2025-06','2025-07','2025-08','2025-09','2025-10','2025-11','2025-12','2026-01','2026-02','2026-03','2026-04','2026-05','2026-06'];
-  const MES_SET=new Set(MESES), budget={}, outRange=new Set();
-  // trios
-  const trios=new Map(), col27={};
-  for(let i=1;i<rows.length;i++){const r=rows[i];if(!r||r.length<23)continue;
-    const k=S(r[4])+"\u241F"+S(r[6])+"\u241F"+S(r[7]);
-    if(!trios.has(k))trios.set(k,[]);
-    trios.get(k).push([S(r[1]),S(r[2]),S(r[3]),S(r[22]),r[5],N(r[12]),N(r[24]),N(r[26]),N(r[28])]);
-    const y=ym(r[5]);if(y){if(!col27[y])col27[y]=[0,0];col27[y][0]+=N(r[27]);col27[y][1]++;
-      if(MES_SET.has(y)){const ta=S(r[1]),d=S(r[3]);let g=null,cu=null;
-        if(ta==="02 - EERR"&&(d==="K) ESTRUCTURA"||d==="K) ESTRUCTURA NQN"||d==="O) IMPUESTOS")){g=d;cu=S(r[9]);}
-        else if(ta==="10 - SUELDOS"&&d!=="NO APLICA"&&d!=="Sin asignar"){g="N) SUELDOS";cu=d;}
-        if(g!==null){if(!budget[g])budget[g]={};if(!budget[g][cu])budget[g][cu]={};if(!budget[g][cu][y])budget[g][cu][y]=[0,0,0,0];const a=budget[g][cu][y];a[0]+=N(r[12]);a[1]+=N(r[24]);a[2]+=N(r[26]);a[3]+=N(r[28]);}
-      }else outRange.add(y);}
-  }
-  // code_class (no-mixtos)
-  const cg={};
-  for(const rs of trios.values()){
-    const gs=new Set();for(const x of rs)if(x[0]==="02 - EERR")gs.add(x[2]);
-    if(gs.size!==1)continue;const g=[...gs][0];
-    for(const x of rs)if(x[0].startsWith("03")){const c=x[1];if(!cg[c])cg[c]={};cg[c][g]=(cg[c][g]||0)+Math.abs(x[5]);}
-  }
-  const code_class={};for(const c in cg){let best=null,bv=-1;for(const g in cg[c])if(cg[c][g]>bv){bv=cg[c][g];best=g;}code_class[c]=best;}
-  const in_cmv=c=>{if(!(re.test(c)||c.startsWith("2)")))return false;const cl=code_class[c]||"";return !(cl.startsWith("M)")||cl.startsWith("P)"));};
-  const attribA=rs=>{const gs=new Set();for(const x of rs)if(x[0]==="02 - EERR")gs.add(x[2]);
-    const r03=rs.filter(x=>x[0].startsWith("03"));
-    if(gs.size===1){const g=[...gs][0];return r03.map(x=>[x,A_G.has(g)]);}
-    const tA=[...gs].some(g=>A_G.has(g));return r03.map(x=>[x,tA]);};
-  const mult={};for(const mz of MESES)mult[mz]=col27[mz]?col27[mz][0]/col27[mz][1]:1.0;
-  // CMV
-  const cmv={},descs={};
-  for(const rs of trios.values())for(const [x,isA] of attribA(rs)){
-    const[,c,d,m,f,ars,uo,ub]=x;
-    if(isA&&in_cmv(c)&&isMov(m)){const y=ym(f);if(!y)continue;
-      if(!cmv[c])cmv[c]={};if(!cmv[c][m])cmv[c][m]={};if(!cmv[c][m][y])cmv[c][m][y]=[0,0,0];
-      const a=cmv[c][m][y];a[0]+=ars;a[1]+=uo;a[2]+=ub;
-      if(!descs[c])descs[c]={};descs[c][d]=(descs[c][d]||0)+1;}
-  }
-  const codes=Object.keys(cmv).sort((a,b)=>{const ba=a.startsWith("2)"),bb=b.startsWith("2)");if(ba!==bb)return ba-bb;return a<b?-1:1;});
-  const aperturas=codes.map(c=>{const mv={};for(const m of["INGRESOS","GASTOS"])if(cmv[c][m]){mv[m]={};for(const y in cmv[c][m])mv[m][y]=cmv[c][m][y].map(v=>Math.round(v*100)/100);}
-    let bd=null,bv=-1;for(const d in descs[c])if(descs[c][d]>bv){bv=descs[c][d];bd=d;}
-    return{codigo:c,desc:bd,es_bucket:c.startsWith("2)"),mov:mv};});
-  // EERR
-  const eagg={};
-  for(const rs of trios.values())for(const x of rs){const[ta,,d,m,f,ars,uo,ub,axi]=x;
-    if(ta==="02 - EERR"&&isMov(m)){const y=ym(f);if(!y)continue;const k=d+"\u241F"+m;
-      if(!eagg[k])eagg[k]={};if(!eagg[k][y])eagg[k][y]=[0,0,0,0];const a=eagg[k][y];a[0]+=ars;a[1]+=uo;a[2]+=ub;a[3]+=axi;}}
-  const grupos=Object.keys(eagg).sort().map(k=>{const[g,m]=k.split("\u241F");const serie={};for(const y of Object.keys(eagg[k]).sort())serie[y]=eagg[k][y].map(v=>Math.round(v*1e4)/1e4);return{grupo:g,movim:m,serie};});
-  return{projData:{meses:MESES,mult,aperturas},eerrData:{meses:MESES,grupos},budget,outOfRange:[...outRange]};
-}
-function aplicarDatos(rows){
-  const r=rebuildData(rows);
-  PROJ_DATA.mult=r.projData.mult;
-  PROJ_DATA.aperturas.length=0;r.projData.aperturas.forEach(a=>PROJ_DATA.aperturas.push(a));
-  DATA.grupos.length=0;r.eerrData.grupos.forEach(g=>DATA.grupos.push(g));
-  // El rango de meses de rebuildData() es una ventana fija interna (para el presupuesto); acá lo
-  // extendemos con cualquier mes real que haya aparecido en los datos, para que el desplegable
-  // Desde/Hasta y los cálculos no se queden pegados a esa ventana si el archivo trae meses nuevos.
-  const mesesVistos=new Set(DATA.meses);
-  DATA.grupos.forEach(g=>Object.keys(g.serie).forEach(m=>mesesVistos.add(m)));
-  DATA.meses=[...mesesVistos].sort();
-  const bs=r.budget||{},MES=DATA.meses,TR=MES.slice(-12),rd2=v=>Math.round(v*100)/100,seen={};
-  CONFIG_PTO.forEach(c=>{const s=(bs[c.grupo]||{})[c.cuenta]||{};const serie={};MES.forEach(m=>serie[m]=s[m]?s[m].map(rd2):[0,0,0,0]);c.serie=serie;const r12=TR.reduce((a,m)=>a+serie[m][3],0);c.real_12m=rd2(r12);c.prom_mensual=rd2(r12/12);seen[c.grupo+"::"+c.cuenta]=1;});
-  let added=0;const PFX={"K) ESTRUCTURA":"","K) ESTRUCTURA NQN":"NQN·","O) IMPUESTOS":"IMP·","N) SUELDOS":"SUE·"};
-  for(const g in PFX){const gm=bs[g]||{};for(const cu in gm){if(seen[g+"::"+cu])continue;const s=gm[cu];const serie={};MES.forEach(m=>serie[m]=s[m]?s[m].map(rd2):[0,0,0,0]);const r12=TR.reduce((a,m)=>a+serie[m][3],0),pm=rd2(r12/12),key=PFX[g]+cu;CONFIG_PTO.push({cuenta:cu,grupo:g,key:key,responsable:null,legajo:null,base:"mensual",pto_sugerido:pm,real_12m:rd2(r12),prom_mensual:pm,serie:serie});if(!OVERRIDES[key])OVERRIDES[key]={base:"mensual",pto:pm};added++;}}
-  try{recompute();}catch(e){console.warn(e);}
-  try{renderPto();}catch(e){console.warn(e);}
-  try{renderCMV();}catch(e){console.warn(e);}
-  return{added,outOfRange:r.outOfRange||[]};
-}
 (function(){
   const btn2=document.getElementById("updRawBtn"),inp2=document.getElementById("updRawFile");
   if(btn2&&inp2){
     btn2.addEventListener("click",()=>inp2.click());
     inp2.addEventListener("change",ev=>{const file=ev.target.files[0];if(file)onCargarInformeCrudo(file);ev.target.value="";});
   }
-})();
-(function(){
-  const btn=document.getElementById("updBtn"),inp=document.getElementById("updFile"),msg=document.getElementById("updMsg");
-  if(!btn)return;
-  btn.addEventListener("click",()=>inp.click());
-  inp.addEventListener("change",ev=>{
-    const file=ev.target.files[0];if(!file)return;
-    msg.textContent="Leyendo "+file.name+"\u2026";msg.className="updmsg";
-    const rd=new FileReader();
-    rd.onload=async e=>{
-      try{
-        const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array",cellDates:true});
-        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true});
-        const hd=(""+(rows[0]&&rows[0][1]||"")).toLowerCase();
-        if(!(hd.includes("auxiliar")||hd.includes("tipo"))){msg.textContent="\u2717 El archivo no parece un export de Tango (no encuentro las columnas esperadas).";msg.className="updmsg err";return;}
-        const res=aplicarDatos(rows);
-        await guardarTodoEnSupabase();
-        const fSel=document.getElementById("from"),tSel=document.getElementById("to");
-        fSel.innerHTML="";tSel.innerHTML="";
-        DATA.meses.forEach((m,i)=>{fSel.add(new Option(mesLabel(m),i));tSel.add(new Option(mesLabel(m),i));});
-        fSel.value=0;tSel.value=DATA.meses.length-1;
-        try{recompute();}catch(e){console.warn(e);}
-        const A=new Set(["A) VENTA","A) CMV VENTA"]);let eA=0;DATA.grupos.forEach(g=>{if(A.has(g.grupo))for(const y in g.serie)eA+=g.serie[y][0];});
-        let cmv=0;PROJ_DATA.aperturas.forEach(a=>{for(const m in a.mov)for(const y in a.mov[m])cmv+=a.mov[m][y][0];});
-        const dif=Math.abs(eA-cmv),ok=dif<Math.max(1,Math.abs(eA)*0.001);
-        msg.textContent="\u2713 Actualizado: "+PROJ_DATA.aperturas.length+" proyectos, presupuesto al día"+(res.added?" (+"+res.added+" líneas nuevas s/resp.)":"")+(res.outOfRange&&res.outOfRange.length?" ⚠ meses fuera de rango: "+res.outOfRange.join(", "):"")+". Cuadre A vs CMV: $"+fmt(dif)+(ok?" \u2014 cuadra.":" \u2014 revisar diferencia.")+" Guardado en Supabase.";
-        msg.className="updmsg "+(ok?"ok":"err");
-      }catch(err){msg.textContent="\u2717 Error al procesar: "+err.message;msg.className="updmsg err";console.error(err);}
-    };
-    rd.onerror=()=>{msg.textContent="\u2717 No se pudo leer el archivo.";msg.className="updmsg err";};
-    rd.readAsArrayBuffer(file);ev.target.value="";
-  });
 })();
 (function(){
   const wireOc=(btnId,inpId,parseFn,destino,nombre)=>{
