@@ -1024,10 +1024,16 @@ function mergeProyCtrlIntoData(res){
    03 comparte Tipo comprobante + Nro. comprobante con su contraparte en el 02 -- ese vinculo se
    verifico 1 a 1 contra el crudo real (100% de los comprobantes del 03 aparecen tambien en el 02).
    Un asiento del 03 solo entra a esta apertura si el comprobante que lo originó esta clasificado
-   en el 02 como "A) VENTA" o "A) CMV VENTA". Lo que no entra ahi (p.ej. quedo cargado como
-   "K) ESTRUCTURA" o "M) INVERSIONES") se junta en "avisos" para que Micaela lo revise y, si
-   corresponde, lo reclasifique en Tango -- no se descarta en silencio. */
+   en el 02 como "A) VENTA" o "A) CMV VENTA". Lo que no entra ahi se junta en "avisos", pero SOLO
+   se marca como reclasificacion pendiente cuando el proyecto/codigo esta definido en la tabla de
+   reglas de Compras (CLASIF_RULES, misma regla que usa esa app para generar los asientos) como
+   "A) VENTA"/"A) CMV VENTA" -- si Compras dice que ese codigo es, por diseño, K) ESTRUCTURA o
+   M) INVERSIONES (p.ej. PL0050, PL0052), no es un error y no se avisa. Copia de esa tabla (solo
+   codigo->clasificacion EERR) traida de 4housing-compras/index.html el 2026-09-16; si se agregan
+   proyectos nuevos ahi, hay que actualizarla aca tambien -- lo ideal es moverla a una tabla
+   compartida en Supabase para que ambas apps lean siempre lo mismo (pendiente, ver charla con Mica). */
 const A_VENTA_CMV=new Set(["A) VENTA","A) CMV VENTA"]);
+const CLASIF_PROY_EERR={"A- STOCK":"B) COSTO ALQUILER MODULO","SUBALQ":"B) COSTO ALQUILER MODULO","VENAM":"A) CMV VENTA","ACOPIO":"A) CMV VENTA","CONSUM":"A) CMV VENTA","AJUSTE":"P) PROVEEDORES","EPP":"A) CMV VENTA","GAS":"A) CMV VENTA","GASOIL":"A) CMV VENTA","DTM":"G) COSTO SERV TERCERIZADOS","ESTNQN":"K) ESTRUCTURA NQN","ESTRUC":"K) ESTRUCTURA","INVERS":"M) INVERSIONES","LOGIST":"I) LOGISTICA EGRESOS","MANMOD":"B) COSTO ALQUILER MODULO","MANREF":"C) COSTO ALQUILER REEFER","MANROD":"K) ESTRUCTURA","MANHRR":"K) ESTRUCTURA","MANMYU":"K) ESTRUCTURA","MANBSU":"K) ESTRUCTURA","PRGP":"P) PROVEEDORES GP","PRLDS":"P) PROVEEDORES LDS","PRMS":"P) PROVEEDORES MS","PROVEE":"P) PROVEEDORES","PRPS":"P) PROVEEDORES PS","BAMBOO":"A) CMV VENTA","IF0002":"A) CMV VENTA","IF3722":"A) CMV VENTA","IF3816":"A) CMV VENTA","IF3829":"A) CMV VENTA","IF3864":"A) CMV VENTA","IF3872":"A) CMV VENTA","IF3910":"A) CMV VENTA","IF3988":"A) CMV VENTA","IF3993":"A) CMV VENTA","IF4022":"A) CMV VENTA","IF4026":"A) CMV VENTA","IF4039":"A) CMV VENTA","IF4072":"A) CMV VENTA","IF4081":"A) CMV VENTA","IF4089":"A) CMV VENTA","IF4110":"A) CMV VENTA","IF4145":"A) CMV VENTA","IF4164":"A) CMV VENTA","IF4167":"A) CMV VENTA","IF4170":"A) CMV VENTA","IF4171":"A) CMV VENTA","IF4173":"A) CMV VENTA","IF4176":"A) CMV VENTA","IF4185":"A) CMV VENTA","IF4187":"A) CMV VENTA","IF4209":"A) CMV VENTA","IF4214":"A) CMV VENTA","IF4234":"A) CMV VENTA","IF4247":"A) CMV VENTA","IF4252":"A) CMV VENTA","IF4256":"A) CMV VENTA","IF4258":"A) CMV VENTA","IF4262":"A) CMV VENTA","IF4266":"A) CMV VENTA","IF4271":"A) CMV VENTA","IF4285":"A) CMV VENTA","IF4286":"A) CMV VENTA","IF4287":"A) CMV VENTA","IF4292":"A) CMV VENTA","IF4294":"A) CMV VENTA","IF4296":"A) CMV VENTA","IF4305":"A) CMV VENTA","IF4308":"A) CMV VENTA","IF4310":"A) CMV VENTA","IF4314":"A) CMV VENTA","IF4315":"A) CMV VENTA","IF4321":"M) INVERSIONES","IF4334":"A) CMV VENTA","IF4336":"A) CMV VENTA","IF4344":"A) CMV VENTA","IF4346":"A) CMV VENTA","IF4352":"A) CMV VENTA","IF4356":"A) CMV VENTA","IF4363":"A) CMV VENTA","IF4368":"A) CMV VENTA","IF4372":"A) CMV VENTA","IF4389":"M) INVERSIONES","PL0004":"A) CMV VENTA","PL0005":"A) CMV VENTA","PL0026":"A) CMV VENTA","PL0027":"A) CMV VENTA","PL0030":"A) CMV VENTA","PL0031":"A) CMV VENTA","PL0033":"A) CMV VENTA","PL0038":"P) PROVEEDORES","PL0042":"A) CMV VENTA","PL0049":"A) CMV VENTA","PL0050":"K) ESTRUCTURA","PL0052":"M) INVERSIONES","PL0053":"A) CMV VENTA","PL0056":"P) PROVEEDORES","PL0057":"A) CMV VENTA","PL0058":"A) CMV VENTA","PL0061":"A) CMV VENTA","PL0063":"K) ESTRUCTURA","PL0065":"A) CMV VENTA","PL0066":"A) CMV VENTA","PL0072":"K) ESTRUCTURA","PL0075":"K) ESTRUCTURA","PL0078":"A) CMV VENTA","PL0079":"A) CMV VENTA","PL0088":"A) CMV VENTA","PL0090":"A) CMV VENTA","PL0092":"K) ESTRUCTURA","PL0093":"A) CMV VENTA","PL0096":"A) CMV VENTA","PL7601":"A) CMV VENTA","PL7602":"A) CMV VENTA","MANTRF":"C) COSTO ALQUILER REEFER"};
 function parseRawLedgerCMV(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -1083,8 +1089,13 @@ function parseRawLedgerCMV(rows){
   });
   const avisosArr=Object.keys(avisos).map(cod=>{
     const filas=Object.keys(avisos[cod].porClasif).map(clasif=>({clasif,ars:Math.round(avisos[cod].porClasif[clasif].ars*100)/100,n:avisos[cod].porClasif[clasif].n}));
-    return {codigo:cod, desc:avisos[cod].desc, esProyecto:/^(PL|IF)\d/.test(cod), filas};
-  }).sort((a,b)=>{ if(a.esProyecto!==b.esProyecto) return a.esProyecto?-1:1; return a.codigo<b.codigo?-1:1; });
+    const esProyecto=/^(PL|IF)\d/.test(cod), regla=CLASIF_PROY_EERR[cod];
+    return {codigo:cod, desc:avisos[cod].desc, esProyecto, regla:regla||null, filas};
+  }).filter(a=>{
+    if(!a.esProyecto) return false; // buckets administrativos (2) ..., 4) ..., 5) ...) no son proyectos de venta
+    if(a.regla==null) return true; // sin regla en Compras: se avisa igual, para que se agregue o se revise a mano
+    return A_VENTA_CMV.has(a.regla); // Compras dice que este codigo es de Ventas/CMV -> lo que quedo afuera si es un aviso real
+  }).sort((a,b)=>{ if(a.regla!==b.regla) return (a.regla==null?1:0)-(b.regla==null?1:0); return a.codigo<b.codigo?-1:1; });
   return {meses:[...mesesSet].sort(), aperturas, avisos:avisosArr};
 }
 const BUCKETS_ORDER_DEFAULT=["2) ACOPIO","2) EPP","2) CONSUM","2) GAS","2) GASOIL"];
@@ -1102,16 +1113,17 @@ function aplicarCMVDesdeCrudo(resC){
 function renderCMVAvisos(){
   const box=document.getElementById("cmvAvisos"); if(!box) return;
   if(!CMV_AVISOS.length){ box.innerHTML=""; return; }
-  const nProy=CMV_AVISOS.filter(a=>a.esProyecto).length;
+  const nSinRegla=CMV_AVISOS.filter(a=>a.regla==null).length;
   let rows="";
   CMV_AVISOS.forEach(a=>{
+    const motivo=a.regla==null?"⚠ sin regla en Compras (agregarlo a CLASIF_RULES)":`⚠ debería ser "${a.regla}" según Compras`;
     a.filas.forEach((f,i)=>{
-      rows+=`<tr class="${a.esProyecto?"neg":""}"><td>${i===0?(a.codigo+(a.esProyecto?" ⚠":"")):""}</td><td>${i===0?a.desc:""}</td><td>${f.clasif}</td><td>${fmt(f.ars)}</td><td>${f.n}</td></tr>`;
+      rows+=`<tr class="neg"><td>${i===0?a.codigo:""}</td><td>${i===0?a.desc:""}</td><td>${i===0?motivo:""}</td><td>${f.clasif}</td><td>${fmt(f.ars)}</td><td>${f.n}</td></tr>`;
     });
   });
-  box.innerHTML=`<div class="cc-h">Avisos de reclasificación (comprobantes de estos códigos NO están vinculados a "A) VENTA"/"A) CMV VENTA" en el 02-EERR)${nProy?` · ⚠ ${nProy} son códigos de proyecto (PL/IF): revisar si hay que reclasificarlos en Tango`:""}</div>
-    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Descripción</th><th>Clasificado en 02-EERR como</th><th>Importe ARS</th><th>Asientos</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="cc-note">Estos montos NO están sumados en la tabla de abajo (no forman parte de la apertura de Ventas/CMV). Si un código de proyecto aparece acá, probablemente haya que corregir su clasificación en Tango.</div>`;
+  box.innerHTML=`<div class="cc-h">Avisos de reclasificación · proyectos de Ventas/CMV (según la tabla de reglas de Compras) con asientos cargados en el 02-EERR bajo otra clasificación${nSinRegla?` · ${nSinRegla} sin regla definida todavía en Compras`:""}</div>
+    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Descripción</th><th>Motivo</th><th>Clasificado en 02-EERR como</th><th>Importe ARS</th><th>Asientos</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="cc-note">Estos montos NO están sumados en la tabla de abajo (no forman parte de la apertura de Ventas/CMV). Códigos donde Compras ya define otra clasificación a propósito (K) ESTRUCTURA, M) INVERSIONES, etc.) no aparecen acá — solo los que deberían ser Ventas/CMV y no lo están.</div>`;
 }
 function convertirMontoOC(fecha,ars){
   if(!fecha) return [ars,0,0,0];
@@ -1413,8 +1425,7 @@ async function onCargarInformeCrudo(file){
     m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
     m2+=" Control Proyectos actualizado: "+Object.keys(resP.proyectos).length+" proyectos con movimientos en este archivo.";
     m2+=" Proyectos/CMV actualizado: "+resC.aperturas.length+" aperturas (proyectos + buckets compartidos).";
-    const nProyAviso=resC.avisos.filter(a=>a.esProyecto).length;
-    if(resC.avisos.length) m2+=` ⚠ ${resC.avisos.length} códigos con asientos fuera de "A) VENTA"/"A) CMV VENTA"${nProyAviso?` (${nProyAviso} son proyectos: revisar en la pestaña Proyectos·CMV)`:""}.`;
+    if(resC.avisos.length) m2+=` ⚠ ${resC.avisos.length} proyectos de Ventas/CMV (según Compras) con asientos mal clasificados en el 02-EERR: revisar en la pestaña Proyectos·CMV.`;
     msgEl.className="updmsg ok"; msgEl.textContent=m2;
     console.log("Filas sin cotizacion completa:",res.sinCotiz);
   }catch(e){
