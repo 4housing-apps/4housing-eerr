@@ -214,7 +214,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <option value="resNeto">Resultado neto + inversiones</option>
     </select></div>
   </div>
-  <div class="panel" id="panelMes"><h3>Evolución mensual</h3><div class="chart-box" style="height:340px"><canvas id="chMes"></canvas></div></div>
+  <div class="panel" id="panelMes"><h3>Evolución mensual<span id="chMesTitulo" style="color:var(--muted);font-weight:normal"></span></h3><div class="chart-box" style="height:340px"><canvas id="chMes"></canvas></div></div>
   <div class="panel" id="panelLinea" style="display:none"><h3>Resultado por línea de negocio (período)</h3><div class="chart-box" style="height:340px"><canvas id="chLinea"></canvas></div></div>
   <div class="table-wrap eerr-wrap"><table id="tabla"></table></div>
   <div class="foot" id="foot"></div>
@@ -416,28 +416,25 @@ function baseOpts(legend){
     }
   };
 }
-const CHSEL_LBL={margen:"Margen bruto (Ventas)",resOp:"Resultado operativo",otros:"Otros resultados",resNetoSinInv:"Resultado neto (sin inversiones)",inversiones:"Inversiones",resNeto:"Resultado neto + inversiones"};
+const CHSEL_LBL={todo:"Todo (ingresos / gastos / resultado)",margen:"Margen bruto (Ventas)",resOp:"Resultado operativo",otros:"Otros resultados",resNetoSinInv:"Resultado neto (sin inversiones)",inversiones:"Inversiones",resNeto:"Resultado neto + inversiones"};
+// Qué bloques (sec) entran en cada opción del selector "Ver" -- misma lista que usan los
+// subtotales de la tabla (recompute()), así el gráfico de cada métrica siempre cuadra con su fila.
+const SECS_FOR={todo:["VENTAS","ESTRUCTURA","SERVICIOS","INVERSIONES"],margen:["VENTAS"],resOp:["VENTAS","ESTRUCTURA"],otros:["SERVICIOS"],resNetoSinInv:["VENTAS","ESTRUCTURA","SERVICIOS"],inversiones:["INVERSIONES"],resNeto:["VENTAS","ESTRUCTURA","SERVICIOS","INVERSIONES"]};
 function renderCharts(pg,meses,bloques){
   const labels=meses.map(mesLabel), sel=document.getElementById("chSel").value;
   if(chMes)chMes.destroy();
-  if(sel==="todo"){
-    const ing=meses.map(m=>pg.filter(x=>x.movim==="INGRESOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
-    const gas=meses.map(m=>pg.filter(x=>x.movim==="GASTOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
-    const res=meses.map((m,i)=>ing[i]+gas[i]); // gas ya viene en negativo
-    // Ingresos y Gastos como barras agrupadas, las dos hacia arriba (valor absoluto); Resultado
-    // como línea con la misma escala que las barras (Chart.js la extiende sola hacia abajo de
-    // cero cuando el resultado da negativo, sin necesitar un eje aparte).
-    chMes=new Chart(document.getElementById("chMes"),{data:{labels,datasets:[
-      {type:"bar",label:"Ingresos",data:ing,backgroundColor:"#9BC0A4",borderRadius:4},
-      {type:"bar",label:"Gastos",data:gas.map(Math.abs),backgroundColor:"#D7A293",borderRadius:4},
-      {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3,borderWidth:2}]},options:baseOpts()});
-  }else{
-    // Misma línea que "Resultado" en el gráfico Todo (color oscuro sólido, sin barras) -- cada
-    // métrica del selector "Ver" ya es un neto que puede dar negativo, igual que Resultado.
-    const serie=bloques[sel],data=meses.map(m=>serie[m]);
-    chMes=new Chart(document.getElementById("chMes"),{type:"line",data:{labels,datasets:[
-      {label:CHSEL_LBL[sel],data,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3,borderWidth:2}]},options:baseOpts(false)});
-  }
+  const t=document.getElementById("chMesTitulo"); if(t)t.textContent=" · "+CHSEL_LBL[sel];
+  // Misma lógica para todas las vistas: Ingresos en verde, Egresos en rojo (las dos barras hacia
+  // arriba, en valor absoluto -- si hubiera un mes con ingresos negativos, esa barra bajaría de
+  // cero, pero es el caso raro), Resultado como línea oscura con puntos, a la misma escala.
+  const secs=SECS_FOR[sel];
+  const ing=meses.map(m=>pg.filter(x=>x.movim==="INGRESOS"&&secs.includes(x.sec)).reduce((s,x)=>s+x.serie[m],0));
+  const gas=meses.map(m=>pg.filter(x=>x.movim==="GASTOS"&&secs.includes(x.sec)).reduce((s,x)=>s+x.serie[m],0));
+  const res=sel==="todo"?meses.map((m,i)=>ing[i]+gas[i]):meses.map(m=>bloques[sel][m]);
+  chMes=new Chart(document.getElementById("chMes"),{data:{labels,datasets:[
+    {type:"bar",label:"Ingresos",data:ing,backgroundColor:"#9BC0A4",borderRadius:4},
+    {type:"bar",label:"Egresos",data:gas.map(Math.abs),backgroundColor:"#D7A293",borderRadius:4},
+    {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3,borderWidth:2}]},options:baseOpts()});
   const L=["A","B","C","D","G","I"],nom={A:"Proyectos (A)",B:"Alq. módulo (B)",C:"Alq. reefer (C)",D:"Viv. modular (D)",G:"Serv. terc. (G)",I:"Logística (I)"};
   const netos=L.map(l=>pg.filter(x=>x.letra===l).reduce((s,x)=>s+x.tot,0));
   if(chLinea)chLinea.destroy();
