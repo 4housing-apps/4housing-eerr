@@ -309,31 +309,46 @@ const fmtM=v=>{const a=Math.abs(v||0);return a>=1e9?(v/1e9).toFixed(2)+" MM":a>=
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;");
 function abreviar(n){if(!n)return"–";const p=n.split(",");if(p.length<2)return n;const ini=p[1].trim().split(/\s+/).filter(Boolean).map(w=>w[0].toUpperCase()+".").join("");return p[0].trim()+(ini?" "+ini:"");}
 
-/* ===== EERR ===== */
-const DIRECTO=new Set(["A) CMV VENTA","B) COSTO ALQUILER MODULO","C) COSTO ALQUILER REEFER","G) COSTO SERV TERCERIZADOS","I) LOGISTICA EGRESOS"]);
+/* ===== EERR =====
+   Estructura visual pedida por Micaela: Ventas (A) aparte -- ahí varía mucho mes a mes y por eso
+   se mira con el histórico largo (desde ago/2022) para entender algo. Todo lo demás (B,C,G,I,J,K,N,O)
+   es más estable/semivariable y se agrupa en un solo resultado de Estructura; se separa en dos
+   bloques visuales nada más para que no sea una lista gigante (alquileres/estructura/sueldos/
+   impuestos, y servicios/logística/otros), pero suman a un único subtotal. Ya no se separa por
+   Ingresos/Gastos: cada línea de venta va pegada a su costo correspondiente. Inversiones (M)
+   queda aparte, como resultado no operativo. */
+const ORDEN_EERR=["A) VENTA","A) CMV VENTA",
+  "B) VENTA ALQUILER MODULO","B) COSTO ALQUILER MODULO",
+  "C) VENTA ALQUILER REEFER","C) COSTO ALQUILER REEFER",
+  "K) ESTRUCTURA","K) ESTRUCTURA NQN","N) SUELDOS","O) IMPUESTOS",
+  "G) VENTA SERV TERCERIZADOS","G) COSTO SERV TERCERIZADOS",
+  "I) LOGISTICA INGRESOS","I) LOGISTICA EGRESOS",
+  "J) OTROS INGRESOS","J) OTROS EGRESOS",
+  "M) INVERSIONES"];
+const ESTRUCTURA1=new Set(["B) VENTA ALQUILER MODULO","B) COSTO ALQUILER MODULO","C) VENTA ALQUILER REEFER","C) COSTO ALQUILER REEFER","K) ESTRUCTURA","K) ESTRUCTURA NQN","N) SUELDOS","O) IMPUESTOS"]);
+const SERVICIOS=new Set(["G) VENTA SERV TERCERIZADOS","G) COSTO SERV TERCERIZADOS","I) LOGISTICA INGRESOS","I) LOGISTICA EGRESOS","J) OTROS INGRESOS","J) OTROS EGRESOS"]);
 function seccion(g){
   if(g.startsWith("P)")||g.startsWith("Q)"))return"EXCLUIDO";
-  if(g==="M) INVERSIONES"||g.startsWith("J)"))return"NO_OP";
-  if(g==="K) ESTRUCTURA")return"ESTR";
-  if(g==="K) ESTRUCTURA NQN")return"ESTRNQN";
-  if(g==="N) SUELDOS")return"SUELDOS";
-  if(g==="O) IMPUESTOS")return"IMPUESTOS";
-  if(DIRECTO.has(g))return"DIRECTO";
-  return"INGOP";}
+  if(g==="A) VENTA"||g==="A) CMV VENTA")return"VENTAS";
+  if(g==="M) INVERSIONES")return"INVERSIONES";
+  if(ESTRUCTURA1.has(g))return"ESTRUCTURA";
+  if(SERVICIOS.has(g))return"SERVICIOS";
+  return"OTROS";} // grupo nuevo de Tango todavía no mapeado a un bloque visual
 const LETRA=g=>(g.match(/^([A-Z])\)/)||[,"?"])[1];
+const ordenEnBloque=g=>{const i=ORDEN_EERR.indexOf(g);return i<0?999:i;};
 let chMes,chLinea;
 function rangoMeses(){const a=+document.getElementById("from").value,b=+document.getElementById("to").value;return DATA.meses.slice(Math.min(a,b),Math.max(a,b)+1);}
 function disp(g,ym,cur){const v=g.serie[ym];const raw=v?+v[cur]:0;return g.movim==="INGRESOS"?-raw:raw;}
 function recompute(){
   const cur=+document.getElementById("cur").value, meses=rangoMeses();
   const pg=DATA.grupos.map(g=>{let tot=0;const s={};meses.forEach(m=>{const d=disp(g,m,cur);s[m]=d;tot+=d;});return{grupo:g.grupo,movim:g.movim,sec:seccion(g.grupo),letra:LETRA(g.grupo),tot,serie:s};});
-  const sum=p=>pg.filter(p).reduce((s,x)=>s+x.tot,0);
-  const ingOp=sum(x=>x.sec==="INGOP"),directo=sum(x=>x.sec==="DIRECTO"),estr=sum(x=>x.sec==="ESTR"),estrn=sum(x=>x.sec==="ESTRNQN"),sue=sum(x=>x.sec==="SUELDOS"),imp=sum(x=>x.sec==="IMPUESTOS");
-  const oi=sum(x=>x.sec==="NO_OP"&&x.movim==="INGRESOS"),oe=sum(x=>x.sec==="NO_OP"&&x.movim==="GASTOS");
-  const margen=ingOp-directo, resOp=margen-estr-estrn-sue-imp, resNeto=resOp+oi-oe;
+  const neto=x=>x.movim==="INGRESOS"?x.tot:-x.tot; // signo real del resultado: ingreso suma, gasto resta
+  const netoSec=secs=>pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+neto(x),0);
+  const ventasBruto=pg.filter(x=>x.grupo==="A) VENTA").reduce((s,x)=>s+x.tot,0);
+  const margen=netoSec(["VENTAS"]), resOp=margen+netoSec(["ESTRUCTURA","SERVICIOS"]), resNeto=resOp+netoSec(["INVERSIONES"]);
   document.getElementById("kpis").innerHTML=[
-    ["Ingresos operativos",ingOp,"ventas A·B·C·D·G·I"],["Margen bruto",margen,"ingresos − costos directos"],
-    ["Resultado operativo",resOp,"margen − estructura/sueldos/impuestos"],["Resultado neto",resNeto,"incl. no operativos (J,M), excl. P y Q"]
+    ["Ventas",ventasBruto,"A) VENTA, bruto"],["Margen bruto",margen,"ventas − CMV de venta (A)"],
+    ["Resultado operativo",resOp,"margen − estructura (alquileres, sueldos, impuestos, servicios, logística, otros)"],["Resultado neto",resNeto,"incl. inversiones (M), excl. P y Q"]
   ].map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="color:${c[1]>=0?"var(--income)":"var(--cost)"}">$ ${fmtM(c[1])}</div><div class="k-sub">${c[2]}</div></div>`).join("");
   renderTabla(pg,meses,{margen,resOp,resNeto});
   try{renderCharts(pg,meses);}catch(e){console.warn("charts:",e);
@@ -349,21 +364,20 @@ function renderTabla(pg,meses,t){
   const head=`<thead><tr><th>Concepto</th>${meses.map(m=>`<th>${mesLabel(m)}</th>`).join("")}<th>Total período</th></tr></thead>`;
   let rows="";
   const secRow=tt=>rows+=`<tr class="section"><td colspan="${meses.length+2}"><span class="seclbl">${tt}</span></td></tr>`;
-  const bloque=(sec,chip)=>pg.filter(x=>x.sec===sec).sort((a,b)=>a.grupo.localeCompare(b.grupo)).forEach(x=>rows+=fila(x.grupo,chip,x.letra,x.serie,meses,x.tot));
-  const serieSec=(secs)=>{const o={};meses.forEach(m=>o[m]=pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+x.serie[m],0));return o;};
-  secRow("Ingresos operativos");bloque("INGOP","c-ing");
-  secRow("Costos directos");bloque("DIRECTO","c-cost");
-  const sM=serieSec(["INGOP"]),sD=serieSec(["DIRECTO"]),margenS={};meses.forEach(m=>margenS[m]=sM[m]-sD[m]);
+  const bloque=(sec,chip)=>pg.filter(x=>x.sec===sec).sort((a,b)=>ordenEnBloque(a.grupo)-ordenEnBloque(b.grupo)).forEach(x=>rows+=fila(x.grupo,chip,x.letra,x.serie,meses,x.tot));
+  const netoSerie=secs=>{const o={};meses.forEach(m=>o[m]=pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+(x.movim==="INGRESOS"?x.serie[m]:-x.serie[m]),0));return o;};
+  secRow("Ventas");bloque("VENTAS","c-ing");
+  const margenS=netoSerie(["VENTAS"]);
   rows+=fila("Margen bruto","","",margenS,meses,t.margen,"subtotal");
-  secRow("Estructura");bloque("ESTR","c-str");
-  secRow("Estructura Neuquén");bloque("ESTRNQN","c-str");
-  secRow("Sueldos");bloque("SUELDOS","c-str");
-  secRow("Impuestos");bloque("IMPUESTOS","c-str");
-  const sOpex=serieSec(["ESTR","ESTRNQN","SUELDOS","IMPUESTOS"]),resOpS={};meses.forEach(m=>resOpS[m]=margenS[m]-sOpex[m]);
+  secRow("Estructura");bloque("ESTRUCTURA","c-str");
+  secRow("Servicios y otros");bloque("SERVICIOS","c-otr");
+  const estrS=netoSerie(["ESTRUCTURA","SERVICIOS"]),resOpS={};meses.forEach(m=>resOpS[m]=margenS[m]+estrS[m]);
   rows+=fila("Resultado operativo","","",resOpS,meses,t.resOp,"subtotal");
-  secRow("Resultados no operativos");bloque("NO_OP","c-otr");
-  const resNS={};meses.forEach(m=>{const oi=pg.filter(x=>x.sec==="NO_OP"&&x.movim==="INGRESOS").reduce((s,x)=>s+x.serie[m],0);const oe=pg.filter(x=>x.sec==="NO_OP"&&x.movim==="GASTOS").reduce((s,x)=>s+x.serie[m],0);resNS[m]=resOpS[m]+oi-oe;});
+  secRow("Inversiones");bloque("INVERSIONES","c-otr");
+  const invS=netoSerie(["INVERSIONES"]),resNS={};meses.forEach(m=>resNS[m]=resOpS[m]+invS[m]);
   rows+=fila("Resultado neto","","",resNS,meses,t.resNeto,"result");
+  const otros=pg.filter(x=>x.sec==="OTROS");
+  if(otros.length){ secRow("Sin clasificar (revisar GRUPO_MOVIM)"); otros.forEach(x=>rows+=fila(x.grupo,"","",x.serie,meses,x.tot)); }
   secRow("Excluidos del resultado");bloque("EXCLUIDO","c-exc");
   document.getElementById("tabla").innerHTML=head+"<tbody>"+rows+"</tbody>";
 }
