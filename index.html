@@ -797,21 +797,25 @@ async function cargarDiccionarioSupabase(){
     return false;
   }
 }
-/* Tabla clasif_proyecto_eerr (Supabase, compartida con Compras): que linea del EERR le corresponde
-   a cada codigo de proyecto. Es la MISMA regla que usa Compras (CLASIF_RULES) para generar los
-   asientos -- Compras sigue con su copia embebida por ahora, pero EERR ya lee de Supabase, asi que
-   si se actualiza la tabla ahi (altas de proyectos nuevos, reclasificaciones) EERR queda al dia sin
-   tocar codigo. Si Supabase no responde, sigue con la copia embebida como respaldo. */
+/* Tabla clasif_renglon (Supabase, compartida con Compras): que linea del EERR le corresponde
+   a cada codigo de proyecto. Es la MISMA tabla que ya usa Compras (motor de asientos, CLASIF_RULES)
+   con su propia pantalla de edicion -- EERR la lee de solo lectura, asi que si se actualiza ahi
+   (altas de proyectos nuevos, reclasificaciones, el pase de un proyecto de Inversion a Gasto
+   Mantenimiento Bs de Uso al terminar la obra, etc.) EERR queda al dia sin tocar codigo.
+   Si Supabase no responde, sigue con la copia embebida como respaldo. */
 async function cargarClasifProyectosSupabase(){
   try{
-    const rows=await sbFetchAllPublic('clasif_proyecto_eerr','codigo');
+    // clasif_renglon es la tabla que ya usa Compras (motor de asiento por clasificacion, con
+    // su propia pantalla de edicion); EERR la lee de solo lectura para quedar alineado con la
+    // misma fuente. Reemplaza a la vieja clasif_proyecto_eerr, que ya no se usa.
+    const rows=await sbFetchAllPublic('clasif_renglon','codigo');
     if(!rows.length) throw new Error('tabla vacia o inexistente todavia');
     const mapa={}; rows.forEach(r=>{ if(r.codigo&&r.eerr) mapa[r.codigo]=r.eerr; });
     Object.assign(CLASIF_PROY_EERR,mapa);
-    console.log('Clasificacion de proyectos cargada desde Supabase (compartida con Compras): '+rows.length+' codigos.');
+    console.log('Clasificacion de proyectos cargada desde Supabase (clasif_renglon, compartida con Compras): '+rows.length+' codigos.');
     return true;
   }catch(e){
-    console.warn('No se pudo cargar clasif_proyecto_eerr de Supabase, sigo con la copia embebida de respaldo:',e);
+    console.warn('No se pudo cargar clasif_renglon de Supabase, sigo con la copia embebida de respaldo:',e);
     return false;
   }
 }
@@ -1066,9 +1070,9 @@ function mergeProyCtrlIntoData(res){
    "A) VENTA"/"A) CMV VENTA" -- si Compras dice que ese codigo es, por diseño, K) ESTRUCTURA o
    M) INVERSIONES (p.ej. PL0050, PL0052), no es un error y no se avisa. Este objeto es la copia
    de respaldo (por si Supabase no responde), sacada de 4housing-compras/index.html el 2026-09-16;
-   cargarClasifProyectosSupabase() la sobreescribe con la tabla compartida clasif_proyecto_eerr
-   (mismo Supabase que usa Compras) apenas arranca la carga del crudo -- esa tabla es la fuente
-   real, y Compras podria migrar a leer de ahi tambien mas adelante. */
+   cargarClasifProyectosSupabase() la sobreescribe con clasif_renglon (la tabla que ya usa
+   Compras para su motor de asientos, mismo Supabase) apenas arranca la carga del crudo -- esa
+   tabla es la fuente real y unica para ambas apps. */
 const A_VENTA_CMV=new Set(["A) VENTA","A) CMV VENTA"]);
 const CLASIF_PROY_EERR={"A- STOCK":"B) COSTO ALQUILER MODULO","SUBALQ":"B) COSTO ALQUILER MODULO","VENAM":"A) CMV VENTA","ACOPIO":"A) CMV VENTA","CONSUM":"A) CMV VENTA","AJUSTE":"P) PROVEEDORES","EPP":"A) CMV VENTA","GAS":"A) CMV VENTA","GASOIL":"A) CMV VENTA","DTM":"G) COSTO SERV TERCERIZADOS","ESTNQN":"K) ESTRUCTURA NQN","ESTRUC":"K) ESTRUCTURA","INVERS":"M) INVERSIONES","LOGIST":"I) LOGISTICA EGRESOS","MANMOD":"B) COSTO ALQUILER MODULO","MANREF":"C) COSTO ALQUILER REEFER","MANROD":"K) ESTRUCTURA","MANHRR":"K) ESTRUCTURA","MANMYU":"K) ESTRUCTURA","MANBSU":"K) ESTRUCTURA","PRGP":"P) PROVEEDORES GP","PRLDS":"P) PROVEEDORES LDS","PRMS":"P) PROVEEDORES MS","PROVEE":"P) PROVEEDORES","PRPS":"P) PROVEEDORES PS","BAMBOO":"A) CMV VENTA","IF0002":"A) CMV VENTA","IF3722":"A) CMV VENTA","IF3816":"A) CMV VENTA","IF3829":"A) CMV VENTA","IF3864":"A) CMV VENTA","IF3872":"A) CMV VENTA","IF3910":"A) CMV VENTA","IF3988":"A) CMV VENTA","IF3993":"A) CMV VENTA","IF4022":"A) CMV VENTA","IF4026":"A) CMV VENTA","IF4039":"A) CMV VENTA","IF4072":"A) CMV VENTA","IF4081":"A) CMV VENTA","IF4089":"A) CMV VENTA","IF4110":"A) CMV VENTA","IF4145":"A) CMV VENTA","IF4164":"A) CMV VENTA","IF4167":"A) CMV VENTA","IF4170":"A) CMV VENTA","IF4171":"A) CMV VENTA","IF4173":"A) CMV VENTA","IF4176":"A) CMV VENTA","IF4185":"A) CMV VENTA","IF4187":"A) CMV VENTA","IF4209":"A) CMV VENTA","IF4214":"A) CMV VENTA","IF4234":"A) CMV VENTA","IF4247":"A) CMV VENTA","IF4252":"M) INVERSIONES","IF4256":"A) CMV VENTA","IF4258":"A) CMV VENTA","IF4262":"A) CMV VENTA","IF4266":"A) CMV VENTA","IF4271":"A) CMV VENTA","IF4285":"A) CMV VENTA","IF4286":"A) CMV VENTA","IF4287":"A) CMV VENTA","IF4292":"A) CMV VENTA","IF4294":"A) CMV VENTA","IF4296":"A) CMV VENTA","IF4305":"A) CMV VENTA","IF4308":"A) CMV VENTA","IF4310":"A) CMV VENTA","IF4314":"A) CMV VENTA","IF4315":"A) CMV VENTA","IF4321":"M) INVERSIONES","IF4334":"A) CMV VENTA","IF4336":"A) CMV VENTA","IF4344":"A) CMV VENTA","IF4346":"B) COSTO ALQUILER MODULO","IF4352":"A) CMV VENTA","IF4356":"A) CMV VENTA","IF4363":"A) CMV VENTA","IF4368":"A) CMV VENTA","IF4372":"A) CMV VENTA","IF4389":"M) INVERSIONES","PL0004":"A) CMV VENTA","PL0005":"A) CMV VENTA","PL0026":"A) CMV VENTA","PL0027":"A) CMV VENTA","PL0030":"A) CMV VENTA","PL0031":"A) CMV VENTA","PL0033":"A) CMV VENTA","PL0038":"P) PROVEEDORES","PL0042":"A) CMV VENTA","PL0049":"A) CMV VENTA","PL0050":"K) ESTRUCTURA","PL0052":"M) INVERSIONES","PL0053":"A) CMV VENTA","PL0056":"P) PROVEEDORES","PL0057":"A) CMV VENTA","PL0058":"A) CMV VENTA","PL0061":"A) CMV VENTA","PL0063":"K) ESTRUCTURA","PL0065":"A) CMV VENTA","PL0066":"A) CMV VENTA","PL0072":"K) ESTRUCTURA","PL0075":"K) ESTRUCTURA","PL0078":"A) CMV VENTA","PL0079":"A) CMV VENTA","PL0088":"A) CMV VENTA","PL0090":"A) CMV VENTA","PL0092":"K) ESTRUCTURA","PL0093":"A) CMV VENTA","PL0096":"A) CMV VENTA","PL7601":"A) CMV VENTA","PL7602":"A) CMV VENTA","MANTRF":"C) COSTO ALQUILER REEFER"};
 function parseRawLedgerCMV(rows){
