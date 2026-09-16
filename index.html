@@ -406,10 +406,13 @@ function renderCharts(pg,meses,bloques){
     const ing=meses.map(m=>pg.filter(x=>x.movim==="INGRESOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
     const gas=meses.map(m=>pg.filter(x=>x.movim==="GASTOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
     const res=meses.map((m,i)=>ing[i]+gas[i]); // gas ya viene en negativo
+    // Ingresos y Gastos como barras agrupadas, las dos hacia arriba (valor absoluto); Resultado
+    // como línea con la misma escala que las barras (Chart.js la extiende sola hacia abajo de
+    // cero cuando el resultado da negativo, sin necesitar un eje aparte).
     chMes=new Chart(document.getElementById("chMes"),{data:{labels,datasets:[
       {type:"bar",label:"Ingresos",data:ing,backgroundColor:"#9BC0A4",borderRadius:4},
-      {type:"bar",label:"Gastos",data:gas,backgroundColor:"#D7A293",borderRadius:4},
-      {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3}]},options:baseOpts()});
+      {type:"bar",label:"Gastos",data:gas.map(Math.abs),backgroundColor:"#D7A293",borderRadius:4},
+      {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3,borderWidth:2}]},options:baseOpts()});
   }else{
     const serie=bloques[sel],data=meses.map(m=>serie[m]);
     chMes=new Chart(document.getElementById("chMes"),{type:"bar",data:{labels,datasets:[
