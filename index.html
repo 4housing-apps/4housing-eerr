@@ -238,6 +238,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <button class="btn" id="cmvPdf">Imprimir / PDF</button>
     </div>
     <div id="cmvControl" class="cmvctrl"></div>
+    <div id="cmvAvisos" class="cmvctrl"></div>
     <div class="table-wrap pto-wrap"><table id="cmvTabla"></table></div>
     <div class="foot" id="cmvFoot"></div>
   </div>
@@ -526,6 +527,7 @@ function setLockCMV(s){editableCMV=s;const st=document.getElementById("cmvLockSt
 function onLockCMV(){if(editableCMV){setLockCMV(false);return;}const inp=document.getElementById("cmvLockKey");if(inp.style.display==="none"){inp.style.display="";inp.focus();return;}if(inp.value===CLAVE_GERENCIA)setLockCMV(true);else{inp.value="";inp.placeholder="Clave incorrecta";inp.focus();}}
 function exportTablaGen(tid,fname){const t=document.getElementById(tid),rows=[];t.querySelectorAll("tr").forEach(tr=>{const head=tr.parentNode.tagName==="THEAD";let tds="";[...tr.children].forEach(td=>{const s=td.querySelector("select"),inp=td.querySelector("input");let v;if(s)v=s.value;else if(inp)v=inp.type==="checkbox"?(inp.checked?"S\u00ed":""):inp.value;else v=td.innerText.replace(/\s+/g," ").trim();let st="border:.5px solid #d8cba6;padding:4px 7px;";if(head)st+="background:#EDEBE1;font-weight:bold;text-align:center;";else st+=td.classList.contains("fzc")?"text-align:left;":"text-align:right;";const tag=head?"th":"td";tds+=`<${tag} style="${st}">${v}</${tag}>`;});rows.push(`<tr>${tds}</tr>`);});const html='<html><head><meta charset="utf-8"></head><body><table style="border-collapse:collapse;font-family:Calibri,Arial;font-size:11px">'+rows.join("")+'</table></body></html>';const blob=new Blob(['\uFEFF'+html],{type:"application/vnd.ms-excel"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fname+".xls";document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);}
 function renderCMV(){
+  renderCMVAvisos();
   const cur=+document.getElementById("cmvCur").value;
   const allm=PROJ_DATA.meses,i0=+document.getElementById("cmvDesde").value,i1=+document.getElementById("cmvHasta").value;
   const a=Math.min(i0,i1),b=Math.max(i0,i1),meses=allm.slice(a,b+1);
@@ -702,14 +704,15 @@ async function guardarTodoEnSupabase(){
     guardarClave('PROY_CTRL_OC',PROY_CTRL_OC),
     guardarClave('PROY_CTRL_PF',PROY_CTRL_PF),
     guardarClave('PROY_CTRL_MANUAL',PROY_CTRL_MANUAL),
+    guardarClave('CMV_AVISOS',CMV_AVISOS),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
-    cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL')
+    cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -721,6 +724,7 @@ async function cargarTodoDesdeSupabase(){
   if(poc){ Object.assign(PROY_CTRL_OC,poc); hubo=true; }
   if(ppf){ Object.assign(PROY_CTRL_PF,ppf); hubo=true; }
   if(pman){ Object.assign(PROY_CTRL_MANUAL,pman); hubo=true; }
+  if(cav){ CMV_AVISOS=cav; hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -1015,10 +1019,27 @@ function mergeProyCtrlIntoData(res){
    procesado aparte. Movimiento (INGRESOS/GASTOS) con la misma regla que el resto de la app: cuenta
    contable que empieza con "4" es Ingresos. El "Saldo Anterior" (al 31/03/2025) y las fechas de
    inicio/cierre de ejecucion de cada proyecto (CMV_CARGA) son datos historicos aparte, no se tocan. */
+/* Regla fina (a pedido de Micaela): esta pestana es LA APERTURA de como se conforma
+   "A) VENTA" + "A) CMV VENTA" del EERR, no "todo lo que haya en tipo aux 03". Cada asiento del
+   03 comparte Tipo comprobante + Nro. comprobante con su contraparte en el 02 -- ese vinculo se
+   verifico 1 a 1 contra el crudo real (100% de los comprobantes del 03 aparecen tambien en el 02).
+   Un asiento del 03 solo entra a esta apertura si el comprobante que lo originó esta clasificado
+   en el 02 como "A) VENTA" o "A) CMV VENTA". Lo que no entra ahi (p.ej. quedo cargado como
+   "K) ESTRUCTURA" o "M) INVERSIONES") se junta en "avisos" para que Micaela lo revise y, si
+   corresponde, lo reclasifique en Tango -- no se descarta en silencio. */
+const A_VENTA_CMV=new Set(["A) VENTA","A) CMV VENTA"]);
 function parseRawLedgerCMV(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
-  const agg={};
+  const comp02={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    if(S(r[1])!=="02 - EERR") continue;
+    const key=S(r[6])+"␟"+S(r[7]);
+    if(!comp02[key]) comp02[key]=new Set();
+    comp02[key].add(S(r[3]));
+  }
+  const agg={}, avisos={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<13) continue;
     const origen=S(r[0]), tipoAux=S(r[1]), cod=S(r[2]), desc=S(r[3]);
@@ -1028,13 +1049,24 @@ function parseRawLedgerCMV(rows){
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
     const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
     const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
-    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz);
-    const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0;
-    if(!agg[cod]) agg[cod]={desc,movs:{}};
-    if(desc && desc.length>(agg[cod].desc||"").length) agg[cod].desc=desc;
-    if(!agg[cod].movs[movim]) agg[cod].movs[movim]={};
-    if(!agg[cod].movs[movim][y]) agg[cod].movs[movim][y]=[0,0,0];
-    const a=agg[cod].movs[movim][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill;
+    const key=S(r[6])+"␟"+S(r[7]);
+    const clasifs=comp02[key]||new Set();
+    const esVentaCMV=[...clasifs].some(d=>A_VENTA_CMV.has(d));
+    if(esVentaCMV){
+      const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz);
+      const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0;
+      if(!agg[cod]) agg[cod]={desc,movs:{}};
+      if(desc && desc.length>(agg[cod].desc||"").length) agg[cod].desc=desc;
+      if(!agg[cod].movs[movim]) agg[cod].movs[movim]={};
+      if(!agg[cod].movs[movim][y]) agg[cod].movs[movim][y]=[0,0,0];
+      const a=agg[cod].movs[movim][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill;
+    } else {
+      const label=clasifs.size?[...clasifs].sort().join(", "):"(sin comprobante 02-EERR vinculado)";
+      if(!avisos[cod]) avisos[cod]={desc,porClasif:{}};
+      if(desc && desc.length>(avisos[cod].desc||"").length) avisos[cod].desc=desc;
+      if(!avisos[cod].porClasif[label]) avisos[cod].porClasif[label]={ars:0,n:0};
+      avisos[cod].porClasif[label].ars+=ars; avisos[cod].porClasif[label].n++;
+    }
   }
   const mesesSet=new Set();
   const aperturas=Object.keys(agg).sort((a,b)=>{
@@ -1049,9 +1081,14 @@ function parseRawLedgerCMV(rows){
     });
     return {codigo:cod, desc:agg[cod].desc, es_bucket:cod.startsWith("2)"), mov};
   });
-  return {meses:[...mesesSet].sort(), aperturas};
+  const avisosArr=Object.keys(avisos).map(cod=>{
+    const filas=Object.keys(avisos[cod].porClasif).map(clasif=>({clasif,ars:Math.round(avisos[cod].porClasif[clasif].ars*100)/100,n:avisos[cod].porClasif[clasif].n}));
+    return {codigo:cod, desc:avisos[cod].desc, esProyecto:/^(PL|IF)\d/.test(cod), filas};
+  }).sort((a,b)=>{ if(a.esProyecto!==b.esProyecto) return a.esProyecto?-1:1; return a.codigo<b.codigo?-1:1; });
+  return {meses:[...mesesSet].sort(), aperturas, avisos:avisosArr};
 }
 const BUCKETS_ORDER_DEFAULT=["2) ACOPIO","2) EPP","2) CONSUM","2) GAS","2) GASOIL"];
+let CMV_AVISOS=[];
 function aplicarCMVDesdeCrudo(resC){
   PROJ_DATA.meses=resC.meses;
   PROJ_DATA.mult={}; resC.meses.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
@@ -1060,6 +1097,21 @@ function aplicarCMVDesdeCrudo(resC){
   const orden=BUCKETS_ORDER_DEFAULT.filter(c=>codigos.has(c));
   [...codigos].filter(c=>!orden.includes(c)).sort().forEach(c=>orden.push(c));
   PROJ_DATA.buckets_order=orden;
+  CMV_AVISOS=resC.avisos;
+}
+function renderCMVAvisos(){
+  const box=document.getElementById("cmvAvisos"); if(!box) return;
+  if(!CMV_AVISOS.length){ box.innerHTML=""; return; }
+  const nProy=CMV_AVISOS.filter(a=>a.esProyecto).length;
+  let rows="";
+  CMV_AVISOS.forEach(a=>{
+    a.filas.forEach((f,i)=>{
+      rows+=`<tr class="${a.esProyecto?"neg":""}"><td>${i===0?(a.codigo+(a.esProyecto?" ⚠":"")):""}</td><td>${i===0?a.desc:""}</td><td>${f.clasif}</td><td>${fmt(f.ars)}</td><td>${f.n}</td></tr>`;
+    });
+  });
+  box.innerHTML=`<div class="cc-h">Avisos de reclasificación (comprobantes de estos códigos NO están vinculados a "A) VENTA"/"A) CMV VENTA" en el 02-EERR)${nProy?` · ⚠ ${nProy} son códigos de proyecto (PL/IF): revisar si hay que reclasificarlos en Tango`:""}</div>
+    <div class="table-wrap"><table><thead><tr><th>Código</th><th>Descripción</th><th>Clasificado en 02-EERR como</th><th>Importe ARS</th><th>Asientos</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="cc-note">Estos montos NO están sumados en la tabla de abajo (no forman parte de la apertura de Ventas/CMV). Si un código de proyecto aparece acá, probablemente haya que corregir su clasificación en Tango.</div>`;
 }
 function convertirMontoOC(fecha,ars){
   if(!fecha) return [ars,0,0,0];
@@ -1361,6 +1413,8 @@ async function onCargarInformeCrudo(file){
     m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
     m2+=" Control Proyectos actualizado: "+Object.keys(resP.proyectos).length+" proyectos con movimientos en este archivo.";
     m2+=" Proyectos/CMV actualizado: "+resC.aperturas.length+" aperturas (proyectos + buckets compartidos).";
+    const nProyAviso=resC.avisos.filter(a=>a.esProyecto).length;
+    if(resC.avisos.length) m2+=` ⚠ ${resC.avisos.length} códigos con asientos fuera de "A) VENTA"/"A) CMV VENTA"${nProyAviso?` (${nProyAviso} son proyectos: revisar en la pestaña Proyectos·CMV)`:""}.`;
     msgEl.className="updmsg ok"; msgEl.textContent=m2;
     console.log("Filas sin cotizacion completa:",res.sinCotiz);
   }catch(e){
