@@ -1009,6 +1009,58 @@ function mergeProyCtrlIntoData(res){
     Object.assign(dst.comprasDet,src.comprasDet); // reemplaza mes por mes, igual que el resto (re-subir un mes lo actualiza, no lo duplica)
   });
 }
+/* ===== Proyectos · CMV, reconstruido desde el mismo crudo de Tango (ya no depende del archivo viejo) =====
+   Mismas filas "03 - INSTRUCTIVO DE FABRICACION" que Control Proyectos, pero sin filtrar solo PL/IF:
+   ac; incluye tambien los "buckets" compartidos (2) ACOPIO, 2) EPP, etc.) que antes traia el archivo
+   procesado aparte. Movimiento (INGRESOS/GASTOS) con la misma regla que el resto de la app: cuenta
+   contable que empieza con "4" es Ingresos. El "Saldo Anterior" (al 31/03/2025) y las fechas de
+   inicio/cierre de ejecucion de cada proyecto (CMV_CARGA) son datos historicos aparte, no se tocan. */
+function parseRawLedgerCMV(rows){
+  const S=s=>(s==null?"":(""+s).trim());
+  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
+  const agg={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r||r.length<13) continue;
+    const origen=S(r[0]), tipoAux=S(r[1]), cod=S(r[2]), desc=S(r[3]);
+    if(tipoAux!=="03 - INSTRUCTIVO DE FABRICACION"||!cod) continue;
+    const cuentaCod=S(r[8]), movim=cuentaCod.startsWith("4")?"INGRESOS":"GASTOS";
+    const fecha=parseFechaCell(r[5]); if(!fecha) continue;
+    const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
+    const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
+    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz);
+    const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0;
+    if(!agg[cod]) agg[cod]={desc,movs:{}};
+    if(desc && desc.length>(agg[cod].desc||"").length) agg[cod].desc=desc;
+    if(!agg[cod].movs[movim]) agg[cod].movs[movim]={};
+    if(!agg[cod].movs[movim][y]) agg[cod].movs[movim][y]=[0,0,0];
+    const a=agg[cod].movs[movim][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill;
+  }
+  const mesesSet=new Set();
+  const aperturas=Object.keys(agg).sort((a,b)=>{
+    const ba=a.startsWith("2)"),bb=b.startsWith("2)");
+    if(ba!==bb) return (ba?1:0)-(bb?1:0); // buckets al final, igual que antes
+    return a<b?-1:1;
+  }).map(cod=>{
+    const mov={};
+    Object.keys(agg[cod].movs).forEach(m=>{
+      mov[m]={};
+      Object.keys(agg[cod].movs[m]).sort().forEach(y=>{ mov[m][y]=agg[cod].movs[m][y].map(v=>Math.round(v*100)/100); mesesSet.add(y); });
+    });
+    return {codigo:cod, desc:agg[cod].desc, es_bucket:cod.startsWith("2)"), mov};
+  });
+  return {meses:[...mesesSet].sort(), aperturas};
+}
+const BUCKETS_ORDER_DEFAULT=["2) ACOPIO","2) EPP","2) CONSUM","2) GAS","2) GASOIL"];
+function aplicarCMVDesdeCrudo(resC){
+  PROJ_DATA.meses=resC.meses;
+  PROJ_DATA.mult={}; resC.meses.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
+  PROJ_DATA.aperturas.length=0; resC.aperturas.forEach(a=>PROJ_DATA.aperturas.push(a));
+  const codigos=new Set(resC.aperturas.filter(a=>a.es_bucket).map(a=>a.codigo));
+  const orden=BUCKETS_ORDER_DEFAULT.filter(c=>codigos.has(c));
+  [...codigos].filter(c=>!orden.includes(c)).sort().forEach(c=>orden.push(c));
+  PROJ_DATA.buckets_order=orden;
+}
 function convertirMontoOC(fecha,ars){
   if(!fecha) return [ars,0,0,0];
   const dstr=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0")+"-"+String(fecha.getUTCDate()).padStart(2,"0");
@@ -1282,6 +1334,8 @@ async function onCargarInformeCrudo(file){
     mergeEERRIntoData(res);
     const resP=parseRawLedgerProyectos(rows);
     mergeProyCtrlIntoData(resP);
+    const resC=parseRawLedgerCMV(rows);
+    aplicarCMVDesdeCrudo(resC);
     msgEl.textContent="Guardando en Supabase...";
     await guardarTodoEnSupabase();
     const f=document.getElementById("from"),t=document.getElementById("to");
@@ -1290,6 +1344,13 @@ async function onCargarInformeCrudo(file){
     f.value=0;t.value=DATA.meses.length-1;
     recompute();
     try{initProy();}catch(e){console.warn("proy:",e);}
+    try{
+      const cd=document.getElementById("cmvDesde"),ch=document.getElementById("cmvHasta");
+      cd.innerHTML="";ch.innerHTML="";
+      PROJ_DATA.meses.forEach((m,i)=>{cd.add(new Option(mesLabel(m),i));ch.add(new Option(mesLabel(m),i));});
+      cd.value=0;ch.value=PROJ_DATA.meses.length-1;
+      renderCMV();
+    }catch(e){console.warn("cmv:",e);}
     const nIgnor=Object.values(res.gruposIgnorados).reduce((s,v)=>s+v,0);
     const nPend=res.sinCotiz.length;
     let m2=`OK: EERR actualizado, ${res.meses.length} meses del informe (${res.meses[0]} a ${res.meses[res.meses.length-1]}).`;
@@ -1299,7 +1360,7 @@ async function onCargarInformeCrudo(file){
     if(nIgnor) m2+=` ${nIgnor} filas con grupo no reconocido, ignoradas: ${Object.keys(res.gruposIgnorados).join(", ")}.`;
     m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
     m2+=" Control Proyectos actualizado: "+Object.keys(resP.proyectos).length+" proyectos con movimientos en este archivo.";
-    m2+=" Nota: Proyectos/CMV (la pestana vieja, con las aperturas 2) ACOPIO/EPP/etc.) NO se actualiza con este archivo, sigue con el ultimo cargado por el otro boton.";
+    m2+=" Proyectos/CMV actualizado: "+resC.aperturas.length+" aperturas (proyectos + buckets compartidos).";
     msgEl.className="updmsg ok"; msgEl.textContent=m2;
     console.log("Filas sin cotizacion completa:",res.sinCotiz);
   }catch(e){
