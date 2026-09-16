@@ -345,12 +345,12 @@ function recompute(){
   const neto=x=>x.movim==="INGRESOS"?x.tot:-x.tot; // signo real del resultado: ingreso suma, gasto resta
   const netoSec=secs=>pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+neto(x),0);
   const ventasBruto=pg.filter(x=>x.grupo==="A) VENTA").reduce((s,x)=>s+x.tot,0);
-  const margen=netoSec(["VENTAS"]), resOp=margen+netoSec(["ESTRUCTURA","SERVICIOS"]), resNeto=resOp+netoSec(["INVERSIONES"]);
+  const margen=netoSec(["VENTAS"]), resOp=margen+netoSec(["ESTRUCTURA"]), otros=netoSec(["SERVICIOS"]), resNeto=resOp+otros+netoSec(["INVERSIONES"]);
   document.getElementById("kpis").innerHTML=[
     ["Ventas",ventasBruto,"A) VENTA, bruto"],["Margen bruto",margen,"ventas − CMV de venta (A)"],
-    ["Resultado operativo",resOp,"margen − estructura (alquileres, sueldos, impuestos, servicios, logística, otros)"],["Resultado neto",resNeto,"incl. inversiones (M), excl. P y Q"]
+    ["Resultado operativo",resOp,"margen − estructura (alquileres, sueldos, impuestos)"],["Resultado neto",resNeto,"incl. otros resultados (G,I,J) e inversiones (M), excl. P y Q"]
   ].map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="color:${c[1]>=0?"var(--income)":"var(--cost)"}">$ ${fmtM(c[1])}</div><div class="k-sub">${c[2]}</div></div>`).join("");
-  renderTabla(pg,meses,{margen,resOp,resNeto});
+  renderTabla(pg,meses,{margen,resOp,otros,resNeto});
   try{renderCharts(pg,meses);}catch(e){console.warn("charts:",e);
     document.getElementById("chMes").parentNode.innerHTML="<div style='color:var(--muted);font-size:12px;padding:20px'>Gráfico no disponible en este entorno.</div>";}
   document.getElementById("foot").innerHTML="Fuente: <b>Datos</b> filtrado por <b>02 - EERR</b>. Ingresos en positivo. <b>P) PROVEEDORES</b> y <b>Q) AJUSTES CTAS</b> no entran al resultado.";
@@ -370,11 +370,13 @@ function renderTabla(pg,meses,t){
   const margenS=netoSerie(["VENTAS"]);
   rows+=fila("Margen bruto","","",margenS,meses,t.margen,"subtotal");
   secRow("Estructura");bloque("ESTRUCTURA","c-str");
-  secRow("Servicios y otros");bloque("SERVICIOS","c-otr");
-  const estrS=netoSerie(["ESTRUCTURA","SERVICIOS"]),resOpS={};meses.forEach(m=>resOpS[m]=margenS[m]+estrS[m]);
+  const estrS=netoSerie(["ESTRUCTURA"]),resOpS={};meses.forEach(m=>resOpS[m]=margenS[m]+estrS[m]);
   rows+=fila("Resultado operativo","","",resOpS,meses,t.resOp,"subtotal");
+  secRow("Otros resultados (servicios, logística y otros — también fluctúan mucho, se miran aparte)");bloque("SERVICIOS","c-otr");
+  const otrosS=netoSerie(["SERVICIOS"]);
+  rows+=fila("Otros resultados","","",otrosS,meses,t.otros,"subtotal");
   secRow("Inversiones");bloque("INVERSIONES","c-otr");
-  const invS=netoSerie(["INVERSIONES"]),resNS={};meses.forEach(m=>resNS[m]=resOpS[m]+invS[m]);
+  const invS=netoSerie(["INVERSIONES"]),resNS={};meses.forEach(m=>resNS[m]=resOpS[m]+otrosS[m]+invS[m]);
   rows+=fila("Resultado neto","","",resNS,meses,t.resNeto,"result");
   const otros=pg.filter(x=>x.sec==="OTROS");
   if(otros.length){ secRow("Sin clasificar (revisar GRUPO_MOVIM)"); otros.forEach(x=>rows+=fila(x.grupo,"","",x.serie,meses,x.tot)); }
