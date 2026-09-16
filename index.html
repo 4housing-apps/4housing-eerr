@@ -248,8 +248,10 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
     <div class="ctl"><label for="pyDesde">Desde</label><select id="pyDesde"></select></div>
     <div class="ctl"><label for="pyHasta">Hasta</label><select id="pyHasta"></select></div>
-    <div class="ctl"><label>Detalle</label><label class="invchk"><input type="checkbox" id="pySoloDif"> Solo proveedores con diferencias</label></div>
+    <div class="ctl"><label for="pyMinDif">Diferencia mínima ($)</label><input id="pyMinDif" class="txt" style="width:90px" placeholder="0" value="0"></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="pyBtn1pct">Solo diferencia &gt; 1%</button></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="pyCsv">Descargar Excel</button></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn updbtn" id="pyExportDif" style="background:#3d5a80">Informe de diferencias (Excel)</button></div>
   </div>
   <div class="updbar">
     <button class="btn updbtn" id="pyOcBtn" style="background:#3d5a80">⟳ Cargar OC Emitidas</button><input type="file" id="pyOcFile" accept=".xlsx" style="display:none">
@@ -844,6 +846,7 @@ const PROY_CTRL={meses:[],proyectos:{}};
 const PROY_CTRL_OC={}, PROY_CTRL_PF={}; // cod -> [ars,usdOficial,usdBillete,axi], snapshot total (no por mes)
 const PROY_CTRL_MANUAL={}; // cod -> {infra, iibbPct, gananciasPct}
 const CAT_FIJAS_GASTO=["Compras","Consumibles","MO 4H","Bonos"];
+let PY_FILTRO_PCT=false; // toggle del boton "Solo diferencia > 1%" en el detalle por proveedor
 function parseRawLedgerProyectos(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -867,7 +870,7 @@ function parseRawLedgerProyectos(rows){
     const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
     const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
     const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0, axi=axiF!=null?ars*axiF:0;
-    if(!pagg[cod]) pagg[cod]={desc:desc,cats:{},comprasProv:{}};
+    if(!pagg[cod]) pagg[cod]={desc:desc,cats:{},comprasProv:{},comprasDet:{}};
     if(desc && desc.length>(pagg[cod].desc||"").length) pagg[cod].desc=desc;
     if(!pagg[cod].cats[cat]) pagg[cod].cats[cat]={};
     if(!pagg[cod].cats[cat][y]) pagg[cod].cats[cat][y]=[0,0,0,0];
@@ -878,6 +881,8 @@ function parseRawLedgerProyectos(rows){
       const prov=S(r[4]);
       if(!pagg[cod].comprasProv[y]) pagg[cod].comprasProv[y]={};
       pagg[cod].comprasProv[y][prov]=(pagg[cod].comprasProv[y][prov]||0)+ars;
+      if(!pagg[cod].comprasDet[y]) pagg[cod].comprasDet[y]=[];
+      pagg[cod].comprasDet[y].push({prov,fecha:dstr,tipoComp:S(r[6]),nroComp:S(r[7]),cuenta:S(r[9]),ars:Math.round(ars*100)/100});
     }
   }
   const mesesSet=new Set(), proyectos={};
@@ -893,19 +898,21 @@ function parseRawLedgerProyectos(rows){
       const o={}; for(const p in pagg[cod].comprasProv[y]) o[p]=Math.round(pagg[cod].comprasProv[y][p]*100)/100;
       comprasProv[y]=o;
     });
-    proyectos[cod]={desc:pagg[cod].desc,cats,comprasProv};
+    proyectos[cod]={desc:pagg[cod].desc,cats,comprasProv,comprasDet:pagg[cod].comprasDet};
   });
   return{meses:[...mesesSet].sort(),proyectos};
 }
 function mergeProyCtrlIntoData(res){
   const mesesSet=new Set([...PROY_CTRL.meses,...res.meses]); PROY_CTRL.meses=[...mesesSet].sort();
   Object.keys(res.proyectos).forEach(cod=>{
-    if(!PROY_CTRL.proyectos[cod]) PROY_CTRL.proyectos[cod]={desc:res.proyectos[cod].desc,cats:{},comprasProv:{}};
+    if(!PROY_CTRL.proyectos[cod]) PROY_CTRL.proyectos[cod]={desc:res.proyectos[cod].desc,cats:{},comprasProv:{},comprasDet:{}};
     else if(res.proyectos[cod].desc) PROY_CTRL.proyectos[cod].desc=res.proyectos[cod].desc;
     const dst=PROY_CTRL.proyectos[cod], src=res.proyectos[cod];
     Object.keys(src.cats).forEach(cat=>{ if(!dst.cats[cat])dst.cats[cat]={}; Object.assign(dst.cats[cat],src.cats[cat]); });
     if(!dst.comprasProv) dst.comprasProv={};
     Object.assign(dst.comprasProv,src.comprasProv);
+    if(!dst.comprasDet) dst.comprasDet={};
+    Object.assign(dst.comprasDet,src.comprasDet); // reemplaza mes por mes, igual que el resto (re-subir un mes lo actualiza, no lo duplica)
   });
 }
 function convertirMontoOC(fecha,ars){
@@ -923,15 +930,20 @@ function parseOCEmitidas(rows){
   const idxTotal=header.indexOf("Total");
   const idxFecha=header.indexOf("Fecha de generaci\u00F3n");
   const idxProv=header.indexOf("C\u00F3d. proveedor");
+  const idxOC=header.indexOf("Nro. Orden de Compra");
+  const idxArt=header.indexOf("Descripci\u00F3n");
+  const idxEstado=header.indexOf("Estado");
   if(idxDesc<0||idxTotal<0) throw new Error('No encuentro las columnas "Descripci\u00F3n Clasificaci\u00F3n (Rengl\u00F3n)" y "Total" en el archivo.');
   const agg={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const m=S(r[idxDesc]).match(/^(PL|IF)\d+/); if(!m) continue;
-    const cod=m[0], v=convertirMontoOC(idxFecha>=0?parseFechaCell(r[idxFecha]):null,N(r[idxTotal]));
-    if(!agg[cod]) agg[cod]={tot:[0,0,0,0],prov:{}};
+    const cod=m[0], fecha=idxFecha>=0?parseFechaCell(r[idxFecha]):null, v=convertirMontoOC(fecha,N(r[idxTotal]));
+    if(!agg[cod]) agg[cod]={tot:[0,0,0,0],prov:{},det:[]};
     for(let k=0;k<4;k++) agg[cod].tot[k]+=v[k];
-    if(idxProv>=0){ const p=S(r[idxProv]); agg[cod].prov[p]=(agg[cod].prov[p]||0)+v[0]; }
+    const p=idxProv>=0?S(r[idxProv]):"";
+    if(p) agg[cod].prov[p]=(agg[cod].prov[p]||0)+v[0];
+    agg[cod].det.push({prov:p,oc:idxOC>=0?S(r[idxOC]):"",fecha:fecha?fecha.toISOString().slice(0,10):"",articulo:idxArt>=0?S(r[idxArt]):"",estado:idxEstado>=0?S(r[idxEstado]):"",ars:v[0]});
   }
   return agg;
 }
@@ -943,15 +955,20 @@ function parseOCPendFacturar(rows){
   const idxPend=header.indexOf("Pendiente de facturar sin impuestos");
   const idxFecha=header.indexOf("Fecha de ingreso");
   const idxProv=header.indexOf("C\u00F3d. proveedor");
+  const idxOC=header.indexOf("Nro. Orden de Compra");
+  const idxArt=header.indexOf("Descripci\u00F3n");
+  const idxEstado=header.indexOf("Estado");
   if(idxCod<0||idxPend<0) throw new Error('No encuentro las columnas "C\u00F3d. clasificaci\u00F3n (Comprobante)" y "Pendiente de facturar sin impuestos" en el archivo.');
   const agg={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r) continue;
     const cod=S(r[idxCod]); if(!/^(PL|IF)\d/.test(cod)) continue;
-    const v=convertirMontoOC(idxFecha>=0?parseFechaCell(r[idxFecha]):null,N(r[idxPend]));
-    if(!agg[cod]) agg[cod]={tot:[0,0,0,0],prov:{}};
+    const fecha=idxFecha>=0?parseFechaCell(r[idxFecha]):null, v=convertirMontoOC(fecha,N(r[idxPend]));
+    if(!agg[cod]) agg[cod]={tot:[0,0,0,0],prov:{},det:[]};
     for(let k=0;k<4;k++) agg[cod].tot[k]+=v[k];
-    if(idxProv>=0){ const p=S(r[idxProv]); agg[cod].prov[p]=(agg[cod].prov[p]||0)+v[0]; }
+    const p=idxProv>=0?S(r[idxProv]):"";
+    if(p) agg[cod].prov[p]=(agg[cod].prov[p]||0)+v[0];
+    agg[cod].det.push({prov:p,oc:idxOC>=0?S(r[idxOC]):"",fecha:fecha?fecha.toISOString().slice(0,10):"",articulo:idxArt>=0?S(r[idxArt]):"",estado:idxEstado>=0?S(r[idxEstado]):"",ars:v[0]});
   }
   return agg;
 }
@@ -967,8 +984,16 @@ function initProy(){
   if(PROY_CTRL.meses.length){ d.value=0; h.value=PROY_CTRL.meses.length-1; }
   if(!initProy._wired){
     initProy._wired=true;
-    ["pyProy","pyCur","pyDesde","pyHasta","pySoloDif"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderProyManual();renderProy();}));
+    ["pyProy","pyCur","pyDesde","pyHasta"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderProyManual();renderProy();}));
+    document.getElementById("pyMinDif").addEventListener("input",()=>renderProy());
+    document.getElementById("pyBtn1pct").addEventListener("click",()=>{
+      PY_FILTRO_PCT=!PY_FILTRO_PCT;
+      const b=document.getElementById("pyBtn1pct");
+      b.style.background=PY_FILTRO_PCT?"#3d5a80":""; b.style.color=PY_FILTRO_PCT?"#fff":"";
+      renderProy();
+    });
     document.getElementById("pyCsv").addEventListener("click",()=>exportTablaGen("pyTabla","control_proyectos"));
+    document.getElementById("pyExportDif").addEventListener("click",exportInformeDiferencias);
   }
   renderProyManual();
   renderProy();
@@ -1076,31 +1101,77 @@ function renderProy(){
    Para Origen=Compras, el campo Leyenda de Tango ES el codigo de proveedor (verificado contra tus
    archivos reales), asi que el cruce es exacto, no aproximado por texto. Solo tiene sentido por
    proyecto individual (mezclar proveedores de "Todos" los proyectos no se puede leer). */
-function renderProyDetalle(codSel,meses){
-  const box=document.getElementById("pyDetalle"); if(!box) return;
-  if(codSel==="__ALL__"){ box.innerHTML='<span class="note">El detalle por proveedor se muestra solo eligiendo un proyecto individual arriba.</span>'; return; }
+/* Lista completa (sin filtrar) de proveedores de un proyecto con su Compras/OC/Pend Facturar/
+   Comprometido/Diferencia/%, para el rango de meses elegido. Usada tanto por la tabla en pantalla
+   como por el informe de Excel, asi ambos muestran siempre lo mismo. */
+function proyDetalleProveedores(codSel,meses){
   const pr=PROY_CTRL.proyectos[codSel];
   const comprasProv={};
   if(pr&&pr.comprasProv) meses.forEach(m=>{const cp=pr.comprasProv[m]; if(cp) for(const p in cp) comprasProv[p]=(comprasProv[p]||0)+cp[p];});
-  const ocProv=(PROY_CTRL_OC[codSel]||{}).prov||{};
-  const pfProv=(PROY_CTRL_PF[codSel]||{}).prov||{};
-  const provs=new Set([...Object.keys(comprasProv),...Object.keys(ocProv),...Object.keys(pfProv)]);
-  if(!provs.size){ box.innerHTML='<span class="note">Todav\u00EDa no hay Compras, OC Emitidas ni Pend. de Facturar cargados para este proyecto.</span>'; return; }
-  const soloDif=(document.getElementById("pySoloDif")||{}).checked;
-  let rows="", nTot=0, nMostrados=0;
-  [...provs].sort().forEach(p=>{
-    const compras=comprasProv[p]||0, oc=ocProv[p]||0, pf=pfProv[p]||0;
+  const ocInfo=PROY_CTRL_OC[codSel]||{prov:{}}, pfInfo=PROY_CTRL_PF[codSel]||{prov:{}};
+  const provs=new Set([...Object.keys(comprasProv),...Object.keys(ocInfo.prov||{}),...Object.keys(pfInfo.prov||{})]);
+  return [...provs].sort().map(p=>{
+    const compras=comprasProv[p]||0, oc=(ocInfo.prov||{})[p]||0, pf=(pfInfo.prov||{})[p]||0;
     const comprometido=oc-pf, dif=comprometido-compras, pct=oc?dif/oc:(compras?-1:0);
-    nTot++;
-    if(soloDif && Math.abs(dif)<1) return;
-    nMostrados++;
-    const cls=Math.abs(dif)<1?"":(Math.abs(pct)<0.01?"pos":"neg");
-    rows+=`<tr><td>${p}</td><td>${fmt(compras)}</td><td>${fmt(oc)}</td><td>${fmt(pf)}</td><td>${fmt(comprometido)}</td><td class="${cls}">${fmt(dif)}</td><td class="${cls}">${(pct*100).toFixed(1)}%</td></tr>`;
+    return{proveedor:p,compras,oc,pf,comprometido,dif,pct};
   });
-  const nota=soloDif?` \u00B7 mostrando ${nMostrados} de ${nTot} proveedores (con diferencia)`:"";
+}
+/* Filtro combinado: "Diferencia minima ($)" (input, 0 = sin piso) Y, si esta activo el boton
+   "Solo diferencia > 1%", tambien exige que el % supere ese umbral. */
+function pasaFiltroDif(c){
+  const raw=String((document.getElementById("pyMinDif")||{}).value||"0").replace(/\./g,"").replace(",",".");
+  const minArs=parseFloat(raw)||0;
+  if(minArs>0 && Math.abs(c.dif)<minArs) return false;
+  if(PY_FILTRO_PCT && Math.abs(c.pct)<0.01) return false;
+  return true;
+}
+function renderProyDetalle(codSel,meses){
+  const box=document.getElementById("pyDetalle"); if(!box) return;
+  if(codSel==="__ALL__"){ box.innerHTML='<span class="note">El detalle por proveedor se muestra solo eligiendo un proyecto individual arriba.</span>'; return; }
+  const lista=proyDetalleProveedores(codSel,meses);
+  if(!lista.length){ box.innerHTML='<span class="note">Todav\u00EDa no hay Compras, OC Emitidas ni Pend. de Facturar cargados para este proyecto.</span>'; return; }
+  const filtrada=lista.filter(pasaFiltroDif);
+  let rows="";
+  filtrada.forEach(c=>{
+    const cls=Math.abs(c.dif)<1?"":(Math.abs(c.pct)<0.01?"pos":"neg");
+    rows+=`<tr><td>${c.proveedor}</td><td>${fmt(c.compras)}</td><td>${fmt(c.oc)}</td><td>${fmt(c.pf)}</td><td>${fmt(c.comprometido)}</td><td class="${cls}">${fmt(c.dif)}</td><td class="${cls}">${(c.pct*100).toFixed(1)}%</td></tr>`;
+  });
+  const nota=filtrada.length!==lista.length?` \u00B7 mostrando ${filtrada.length} de ${lista.length} proveedores (seg\u00FAn filtro)`:"";
   box.innerHTML=`<div class="cc-h">Detalle por proveedor \u00B7 rango de meses elegido arriba, siempre en ARS${nota}</div>
-    <div class="table-wrap">${rows?`<table><thead><tr><th>Proveedor</th><th>Compras (Tango)</th><th>OC Emitidas</th><th>Pend. Facturar</th><th>Comprometido</th><th>Diferencia</th><th>%</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="note" style="padding:12px">Ning\u00FAn proveedor tiene diferencia \u2014 todo cuadra.</div>'}</div>
+    <div class="table-wrap">${rows?`<table><thead><tr><th>Proveedor</th><th>Compras (Tango)</th><th>OC Emitidas</th><th>Pend. Facturar</th><th>Comprometido</th><th>Diferencia</th><th>%</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="note" style="padding:12px">Ning\u00FAn proveedor pasa el filtro actual.</div>'}</div>
     <div class="cc-note">Mismo cruce que us\u00E1s en tu Excel (solapa "Dif"): para Compras, el c\u00F3digo de proveedor sale directo del campo Leyenda de Tango. Si un proveedor no cuadra, revis\u00E1 notas de cr\u00E9dito, OCs cargadas contra otro proyecto, o comprobantes todav\u00EDa no vinculados a una OC.</div>`;
+}
+/* Informe de diferencias (Excel real, con XLSX.writeFile): para el proyecto elegido, arma un libro
+   con el resumen de diferencias por proveedor (los mismos que se ven filtrados en pantalla) y,
+   para cada uno, el detalle linea por linea de sus Compras contabilizadas, sus OC Emitidas y sus
+   Pend. de Facturar -- para poder auditar de donde sale cada diferencia. */
+function exportInformeDiferencias(){
+  const codSel=document.getElementById("pyProy").value||"__ALL__";
+  const msg=document.getElementById("pyMsg");
+  if(codSel==="__ALL__"){ msg.className="updmsg err"; msg.textContent="\u2717 Eleg\u00ED un proyecto individual arriba para descargar el informe de diferencias."; return; }
+  const dSel=document.getElementById("pyDesde"), hSel=document.getElementById("pyHasta");
+  const i0=+dSel.value||0, i1=hSel.value===""?PROY_CTRL.meses.length-1:+hSel.value;
+  const meses=PROY_CTRL.meses.slice(i0,i1+1);
+  const pr=PROY_CTRL.proyectos[codSel];
+  const ocInfo=PROY_CTRL_OC[codSel]||{det:[]}, pfInfo=PROY_CTRL_PF[codSel]||{det:[]};
+  const conDif=proyDetalleProveedores(codSel,meses).filter(pasaFiltroDif);
+  if(!conDif.length){ msg.className="updmsg ok"; msg.textContent="\u2713 Ning\u00FAn proveedor de "+codSel+" pasa el filtro actual (diferencia m\u00EDnima / >1%) \u2014 nada para exportar."; return; }
+  const provsDif=new Set(conDif.map(c=>c.proveedor));
+  const wb=XLSX.utils.book_new();
+  const wsResumen=XLSX.utils.json_to_sheet(conDif.map(c=>({
+    "Proveedor":c.proveedor,"Compras (Tango)":c.compras,"OC Emitidas":c.oc,"Pend. Facturar":c.pf,
+    "Comprometido":c.comprometido,"Diferencia":c.dif,"% s/ OC Emitidas":Math.round(c.pct*10000)/100
+  })));
+  XLSX.utils.book_append_sheet(wb,wsResumen,"Resumen diferencias");
+  const comprasDetRows=[];
+  meses.forEach(m=>{ const det=(pr&&pr.comprasDet&&pr.comprasDet[m])||[]; det.forEach(d=>{ if(provsDif.has(d.prov)) comprasDetRows.push({"Proveedor":d.prov,"Fecha":d.fecha,"Tipo comprobante":d.tipoComp,"Nro. comprobante":d.nroComp,"Cuenta":d.cuenta,"Importe ARS":d.ars}); }); });
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(comprasDetRows.length?comprasDetRows:[{"Info":"Sin comprobantes de Compras para estos proveedores en el per\u00EDodo elegido"}]),"Compras (Tango)");
+  const ocDetRows=(ocInfo.det||[]).filter(d=>provsDif.has(d.prov)).map(d=>({"Proveedor":d.prov,"Nro. OC":d.oc,"Fecha":d.fecha,"Art\u00EDculo":d.articulo,"Estado":d.estado,"Total ARS":d.ars}));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(ocDetRows.length?ocDetRows:[{"Info":"Sin OC Emitidas para estos proveedores"}]),"OC Emitidas");
+  const pfDetRows=(pfInfo.det||[]).filter(d=>provsDif.has(d.prov)).map(d=>({"Proveedor":d.prov,"Nro. OC":d.oc,"Fecha":d.fecha,"Art\u00EDculo":d.articulo,"Estado":d.estado,"Pendiente ARS":d.ars}));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(pfDetRows.length?pfDetRows:[{"Info":"Sin Pend. de Facturar para estos proveedores"}]),"Pend. Facturar");
+  XLSX.writeFile(wb,`diferencias_${codSel}.xlsx`);
+  msg.className="updmsg ok"; msg.textContent="\u2713 Informe descargado: "+conDif.length+" proveedores con diferencia para "+codSel+".";
 }
 async function onCargarInformeCrudo(file){
   const msgEl=document.getElementById("updMsg");
