@@ -248,6 +248,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
       <option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
     <div class="ctl"><label for="pyDesde">Desde</label><select id="pyDesde"></select></div>
     <div class="ctl"><label for="pyHasta">Hasta</label><select id="pyHasta"></select></div>
+    <div class="ctl"><label>Detalle</label><label class="invchk"><input type="checkbox" id="pySoloDif"> Solo proveedores con diferencias</label></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="pyCsv">Descargar Excel</button></div>
   </div>
   <div class="updbar">
@@ -966,7 +967,7 @@ function initProy(){
   if(PROY_CTRL.meses.length){ d.value=0; h.value=PROY_CTRL.meses.length-1; }
   if(!initProy._wired){
     initProy._wired=true;
-    ["pyProy","pyCur","pyDesde","pyHasta"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderProyManual();renderProy();}));
+    ["pyProy","pyCur","pyDesde","pyHasta","pySoloDif"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderProyManual();renderProy();}));
     document.getElementById("pyCsv").addEventListener("click",()=>exportTablaGen("pyTabla","control_proyectos"));
   }
   renderProyManual();
@@ -1085,15 +1086,20 @@ function renderProyDetalle(codSel,meses){
   const pfProv=(PROY_CTRL_PF[codSel]||{}).prov||{};
   const provs=new Set([...Object.keys(comprasProv),...Object.keys(ocProv),...Object.keys(pfProv)]);
   if(!provs.size){ box.innerHTML='<span class="note">Todav\u00EDa no hay Compras, OC Emitidas ni Pend. de Facturar cargados para este proyecto.</span>'; return; }
-  let rows="";
+  const soloDif=(document.getElementById("pySoloDif")||{}).checked;
+  let rows="", nTot=0, nMostrados=0;
   [...provs].sort().forEach(p=>{
     const compras=comprasProv[p]||0, oc=ocProv[p]||0, pf=pfProv[p]||0;
     const comprometido=oc-pf, dif=comprometido-compras, pct=oc?dif/oc:(compras?-1:0);
+    nTot++;
+    if(soloDif && Math.abs(dif)<1) return;
+    nMostrados++;
     const cls=Math.abs(dif)<1?"":(Math.abs(pct)<0.01?"pos":"neg");
     rows+=`<tr><td>${p}</td><td>${fmt(compras)}</td><td>${fmt(oc)}</td><td>${fmt(pf)}</td><td>${fmt(comprometido)}</td><td class="${cls}">${fmt(dif)}</td><td class="${cls}">${(pct*100).toFixed(1)}%</td></tr>`;
   });
-  box.innerHTML=`<div class="cc-h">Detalle por proveedor \u00B7 rango de meses elegido arriba, siempre en ARS</div>
-    <div class="table-wrap"><table><thead><tr><th>Proveedor</th><th>Compras (Tango)</th><th>OC Emitidas</th><th>Pend. Facturar</th><th>Comprometido</th><th>Diferencia</th><th>%</th></tr></thead><tbody>${rows}</tbody></table></div>
+  const nota=soloDif?` \u00B7 mostrando ${nMostrados} de ${nTot} proveedores (con diferencia)`:"";
+  box.innerHTML=`<div class="cc-h">Detalle por proveedor \u00B7 rango de meses elegido arriba, siempre en ARS${nota}</div>
+    <div class="table-wrap">${rows?`<table><thead><tr><th>Proveedor</th><th>Compras (Tango)</th><th>OC Emitidas</th><th>Pend. Facturar</th><th>Comprometido</th><th>Diferencia</th><th>%</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="note" style="padding:12px">Ning\u00FAn proveedor tiene diferencia \u2014 todo cuadra.</div>'}</div>
     <div class="cc-note">Mismo cruce que us\u00E1s en tu Excel (solapa "Dif"): para Compras, el c\u00F3digo de proveedor sale directo del campo Leyenda de Tango. Si un proveedor no cuadra, revis\u00E1 notas de cr\u00E9dito, OCs cargadas contra otro proyecto, o comprobantes todav\u00EDa no vinculados a una OC.</div>`;
 }
 async function onCargarInformeCrudo(file){
