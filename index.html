@@ -275,9 +275,10 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
     <div class="ctl"><label>&nbsp;</label><button class="btn updbtn" id="pyExportDif" style="background:#3d5a80">Informe de diferencias (Excel)</button></div>
   </div>
   <div class="updbar">
+    <button class="btn updbtn" id="pyCrudoBtn" style="background:#8a6d3b">⟳ Cargar informe Tango (verificación)</button><input type="file" id="pyCrudoFile" accept=".xlsx" style="display:none">
     <button class="btn updbtn" id="pyOcBtn" style="background:#3d5a80">⟳ Cargar OC Emitidas</button><input type="file" id="pyOcFile" accept=".xlsx" style="display:none">
     <button class="btn updbtn" id="pyPfBtn" style="background:#3d5a80">⟳ Cargar OC Pend. de Facturar</button><input type="file" id="pyPfFile" accept=".xlsx" style="display:none">
-    <span id="pyMsg" class="updmsg">La Contabilidad se toma sola del informe crudo de Tango que subís en "Estado de Resultados". Acá solo hace falta subir OC Emitidas y OC Pendientes de Facturar.</span>
+    <span id="pyMsg" class="updmsg">Control Proyectos es independiente: no se actualiza solo al cargar el informe en "Estado de Resultados" (ahí te va a preguntar si también querés actualizarlo). Para verificar un archivo acá sin tocar el Estado de Resultados, usá "Cargar informe Tango (verificación)".</span>
   </div>
   <div class="kpis" id="pyKpis"></div>
   <div id="pyManual" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
@@ -1043,6 +1044,41 @@ function mergeEERRIntoData(res){
   const grupos=Object.keys(byKey).map(k=>{const[grupo,movim]=k.split("\u241F");return{grupo,movim,serie:byKey[k]};});
   DATA.meses=meses; DATA.grupos=grupos;
 }
+/* Presupuesto\u00B7Estructura: mismas filas "02 - EERR" que el EERR, pero agregadas por cuenta puntual
+   (columna "Cuenta") en vez de por el grupo entero -- es el detalle que necesita cada l\u00EDnea de
+   CONFIG_PTO. Antes CONFIG_PTO.serie quedaba fijo para siempre (se hab\u00EDa cargado una sola vez a
+   mano); ahora se actualiza mes a mes con cada informe, igual que el resto de la app. */
+function parseRawLedgerCuentas(rows){
+  const S=s=>(s==null?"":(""+s).trim());
+  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
+  const cagg={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r||r.length<10) continue;
+    const origen=S(r[0]), tipoAux=S(r[1]), grupo=S(r[3]), cuenta=S(r[9]);
+    if(tipoAux!=="02 - EERR"||!GRUPO_MOVIM[grupo]) continue;
+    const fecha=parseFechaCell(r[5]); if(!fecha) continue;
+    const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
+    const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
+    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
+    const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0, axi=axiF!=null?ars*axiF:0;
+    const k=cuenta+"\u241F"+grupo;
+    if(!cagg[k]) cagg[k]={};
+    if(!cagg[k][y]) cagg[k][y]=[0,0,0,0];
+    const a=cagg[k][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
+  }
+  const out={};
+  Object.keys(cagg).forEach(k=>{ const serie={}; Object.keys(cagg[k]).sort().forEach(y=>serie[y]=cagg[k][y].map(v=>Math.round(v*1e4)/1e4)); out[k]=serie; });
+  return out; // "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
+}
+function mergePtoRealIntoConfig(cuentasAgg){
+  let n=0;
+  CONFIG_PTO.forEach(c=>{
+    const nuevo=cuentasAgg[c.cuenta+"\u241F"+c.grupo];
+    if(nuevo){ Object.assign(c.serie,nuevo); n++; }
+  });
+  return n;
+}
 
 /* ===== Control Proyectos (tipo aux "03 - INSTRUCTIVO DE FABRICACION") =====
    Se alimenta del MISMO informe crudo de Tango que el EERR (no hace falta otro archivo para
@@ -1566,8 +1602,8 @@ async function onCargarInformeCrudo(file){
     await fetchLiveTC();
     const res=parseRawLedgerEERR(rows);
     mergeEERRIntoData(res);
-    const resP=parseRawLedgerProyectos(rows);
-    mergeProyCtrlIntoData(resP);
+    const resCuentas=parseRawLedgerCuentas(rows);
+    const nCuentas=mergePtoRealIntoConfig(resCuentas);
     const resC=parseRawLedgerCMV(rows);
     aplicarCMVDesdeCrudo(resC);
     msgEl.textContent="Guardando en Supabase...";
@@ -1577,7 +1613,13 @@ async function onCargarInformeCrudo(file){
     DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
     f.value=0;t.value=DATA.meses.length-1;
     recompute();
-    try{initProy();}catch(e){console.warn("proy:",e);}
+    try{
+      const pd=document.getElementById("pDesde"),ph=document.getElementById("pHasta"),pm=pMonths();
+      pd.innerHTML="";ph.innerHTML="";
+      pm.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
+      pd.value=0;ph.value=pm.length-1;
+      renderPto();
+    }catch(e){console.warn("pto:",e);}
     try{
       const cd=document.getElementById("cmvDesde"),ch=document.getElementById("cmvHasta");
       cd.innerHTML="";ch.innerHTML="";
@@ -1592,12 +1634,23 @@ async function onCargarInformeCrudo(file){
     if(LIVE_TC.ofic) m2+=` Cotizacion en vivo obtenida de dolarapi.com (${LIVE_TC.fecha||"hoy"}).`; else m2+=" No se pudo conectar a dolarapi.com (revisa conexion) — fechas fuera del historico quedan sin USD/AXI.";
     if(nPend) m2+=` ⚠ ${nPend} filas sin cotizacion completa (fechas sin historico ni dato en vivo) — no se inventaron valores, quedaron en 0 para esas filas.`;
     if(nIgnor) m2+=` ${nIgnor} filas con grupo no reconocido, ignoradas: ${Object.keys(res.gruposIgnorados).join(", ")}.`;
-    m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
-    m2+=" Control Proyectos actualizado: "+Object.keys(resP.proyectos).length+" proyectos con movimientos en este archivo.";
+    m2+=" Presupuesto·Estructura actualizado: "+nCuentas+" cuentas.";
     m2+=" Proyectos/CMV actualizado: "+resC.aperturas.length+" aperturas (proyectos + buckets compartidos).";
     if(resC.avisos.length) m2+=` ⚠ ${resC.avisos.length} proyectos de Ventas/CMV (según Compras) con asientos mal clasificados en el 02-EERR: revisar en la pestaña Proyectos·CMV.`;
+    m2+=" Guardado en Supabase: la proxima vez que abras la app, ya va a estar cargado.";
     msgEl.className="updmsg ok"; msgEl.textContent=m2;
     console.log("Filas sin cotizacion completa:",res.sinCotiz);
+    // Control Proyectos es independiente a propósito (sirve para verificar la carga, no tiene que
+    // reflejar automáticamente lo mismo que ya cuadró en el EERR) -- se pregunta en vez de tocarlo solo.
+    if(confirm("¿Querés actualizar también Control Proyectos con este mismo archivo?")){
+      try{
+        const resP=parseRawLedgerProyectos(rows);
+        mergeProyCtrlIntoData(resP);
+        await guardarClave('PROY_CTRL',PROY_CTRL);
+        initProy();
+        msgEl.textContent+=" Control Proyectos actualizado: "+Object.keys(resP.proyectos).length+" proyectos con movimientos en este archivo.";
+      }catch(e){ console.warn("proy:",e); msgEl.textContent+=" ⚠ No se pudo actualizar Control Proyectos: "+e.message; }
+    }
   }catch(e){
     msgEl.className="updmsg err"; msgEl.textContent="Error procesando el archivo: "+e.message;
     console.error(e);
@@ -1638,6 +1691,31 @@ async function onCargarInformeCrudo(file){
   };
   wireOc("pyOcBtn","pyOcFile",parseOCEmitidas,PROY_CTRL_OC,"OC Emitidas");
   wireOc("pyPfBtn","pyPfFile",parseOCPendFacturar,PROY_CTRL_PF,"OC Pendientes de Facturar");
+})();
+(function(){
+  // Carga de verificación, independiente del botón de "Estado de Resultados": actualiza solo
+  // Control Proyectos (merge mes a mes, no reemplaza), no toca DATA/PROJ_DATA/CONFIG_PTO.
+  const btn=document.getElementById("pyCrudoBtn"),inp=document.getElementById("pyCrudoFile"),msg=document.getElementById("pyMsg");
+  if(!btn||!inp) return;
+  btn.addEventListener("click",()=>inp.click());
+  inp.addEventListener("change",ev=>{
+    const file=ev.target.files[0]; if(!file) return;
+    msg.className="updmsg"; msg.textContent="Leyendo "+file.name+"…";
+    const rd=new FileReader();
+    rd.onload=async e=>{
+      try{
+        const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array",cellDates:true});
+        const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true});
+        const resP=parseRawLedgerProyectos(rows);
+        mergeProyCtrlIntoData(resP);
+        await guardarClave('PROY_CTRL',PROY_CTRL);
+        initProy();
+        msg.className="updmsg ok"; msg.textContent="✓ Control Proyectos actualizado (verificación, no toca Estado de Resultados): "+Object.keys(resP.proyectos).length+" proyectos. Guardado en Supabase.";
+      }catch(err){ msg.className="updmsg err"; msg.textContent="✗ Error al procesar el informe: "+err.message; console.error(err); }
+    };
+    rd.onerror=()=>{msg.className="updmsg err"; msg.textContent="✗ No se pudo leer el archivo.";};
+    rd.readAsArrayBuffer(file); ev.target.value="";
+  });
 })();
 
 (async function start(){
