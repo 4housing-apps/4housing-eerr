@@ -200,7 +200,17 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
   </div>
   <div class="kpis" id="kpis"></div>
   <div class="grid2">
-    <div class="panel"><h3>Evolución mensual</h3><div class="chart-box"><canvas id="chMes"></canvas></div></div>
+    <div class="panel"><h3>Evolución mensual</h3>
+      <div class="ctl" style="margin:0 0 8px"><label for="chSel">Ver</label><select id="chSel">
+        <option value="todo">Todo (ingresos / gastos / resultado)</option>
+        <option value="margen">Margen bruto (Ventas)</option>
+        <option value="resOp">Resultado operativo</option>
+        <option value="otros">Otros resultados</option>
+        <option value="resNetoSinInv">Resultado neto (sin inversiones)</option>
+        <option value="inversiones">Inversiones</option>
+        <option value="resNeto">Resultado neto + inversiones</option>
+      </select></div>
+      <div class="chart-box"><canvas id="chMes"></canvas></div></div>
     <div class="panel"><h3>Resultado por línea de negocio (período)</h3><div class="chart-box"><canvas id="chLinea"></canvas></div></div>
   </div>
   <div class="table-wrap eerr-wrap"><table id="tabla"></table></div>
@@ -338,63 +348,75 @@ const LETRA=g=>(g.match(/^([A-Z])\)/)||[,"?"])[1];
 const ordenEnBloque=g=>{const i=ORDEN_EERR.indexOf(g);return i<0?999:i;};
 let chMes,chLinea;
 function rangoMeses(){const a=+document.getElementById("from").value,b=+document.getElementById("to").value;return DATA.meses.slice(Math.min(a,b),Math.max(a,b)+1);}
-function disp(g,ym,cur){const v=g.serie[ym];const raw=v?+v[cur]:0;return g.movim==="INGRESOS"?-raw:raw;}
+function disp(g,ym,cur){const v=g.serie[ym];const raw=v?+v[cur]:0;return -raw;} // ingresos en positivo, gastos en negativo (signo real)
+function sumSerie(pg,meses,secs){const o={};meses.forEach(m=>o[m]=pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+x.serie[m],0));return o;}
+function sumaSerie(...series){const meses=Object.keys(series[0]),o={};meses.forEach(m=>o[m]=series.reduce((s,se)=>s+se[m],0));return o;}
+function totalSerie(s){return Object.values(s).reduce((a,b)=>a+b,0);}
 function recompute(){
   const cur=+document.getElementById("cur").value, meses=rangoMeses();
   const pg=DATA.grupos.map(g=>{let tot=0;const s={};meses.forEach(m=>{const d=disp(g,m,cur);s[m]=d;tot+=d;});return{grupo:g.grupo,movim:g.movim,sec:seccion(g.grupo),letra:LETRA(g.grupo),tot,serie:s};});
-  const neto=x=>x.movim==="INGRESOS"?x.tot:-x.tot; // signo real del resultado: ingreso suma, gasto resta
-  const netoSec=secs=>pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+neto(x),0);
   const ventasBruto=pg.filter(x=>x.grupo==="A) VENTA").reduce((s,x)=>s+x.tot,0);
-  const margen=netoSec(["VENTAS"]), resOp=margen+netoSec(["ESTRUCTURA"]), otros=netoSec(["SERVICIOS"]), resNeto=resOp+otros+netoSec(["INVERSIONES"]);
+  const margenS=sumSerie(pg,meses,["VENTAS"]);
+  const resOpS=sumaSerie(margenS,sumSerie(pg,meses,["ESTRUCTURA"]));
+  const otrosS=sumSerie(pg,meses,["SERVICIOS"]);
+  const resNetoSinInvS=sumaSerie(resOpS,otrosS);
+  const invS=sumSerie(pg,meses,["INVERSIONES"]);
+  const resNetoS=sumaSerie(resNetoSinInvS,invS);
+  const bloques={margen:margenS,resOp:resOpS,otros:otrosS,resNetoSinInv:resNetoSinInvS,inversiones:invS,resNeto:resNetoS};
+  const margen=totalSerie(margenS),resOp=totalSerie(resOpS),otros=totalSerie(otrosS),resNeto=totalSerie(resNetoS);
   document.getElementById("kpis").innerHTML=[
     ["Ventas",ventasBruto,"A) VENTA, bruto"],["Margen bruto",margen,"ventas − CMV de venta (A)"],
     ["Resultado operativo",resOp,"margen − estructura (alquileres, sueldos, impuestos)"],["Resultado neto",resNeto,"incl. otros resultados (G,I,J) e inversiones (M), excl. P y Q"]
   ].map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="color:${c[1]>=0?"var(--income)":"var(--cost)"}">$ ${fmtM(c[1])}</div><div class="k-sub">${c[2]}</div></div>`).join("");
-  renderTabla(pg,meses,{margen,resOp,otros,resNeto});
-  try{renderCharts(pg,meses);}catch(e){console.warn("charts:",e);
+  renderTabla(pg,meses,bloques);
+  try{renderCharts(pg,meses,bloques);}catch(e){console.warn("charts:",e);
     document.getElementById("chMes").parentNode.innerHTML="<div style='color:var(--muted);font-size:12px;padding:20px'>Gráfico no disponible en este entorno.</div>";}
-  document.getElementById("foot").innerHTML="Fuente: <b>Datos</b> filtrado por <b>02 - EERR</b>. Ingresos en positivo. <b>P) PROVEEDORES</b> y <b>Q) AJUSTES CTAS</b> no entran al resultado.";
+  document.getElementById("foot").innerHTML="Fuente: <b>Datos</b> filtrado por <b>02 - EERR</b>. Ingresos en positivo, gastos en negativo. <b>P) PROVEEDORES</b> y <b>Q) AJUSTES CTAS</b> no entran al resultado.";
 }
 function fila(nombre,chip,chipTxt,serie,meses,total,cls){
   const tds=meses.map(m=>{const v=serie?serie[m]:null;const c=v==null?"":(v>=0?"pos":"neg");return `<td class="${c}">${v==null||v===0?"–":fmt(v)}</td>`;}).join("");
   const label=chipTxt?`<span class="chip ${chip}">${chipTxt}</span> ${nombre}`:nombre;
   return `<tr class="${cls||""}"><td>${label}</td>${tds}<td class="${total>=0?"pos":"neg"}"><b>${fmt(total)}</b></td></tr>`;
 }
-function renderTabla(pg,meses,t){
+function renderTabla(pg,meses,b){
   const head=`<thead><tr><th>Concepto</th>${meses.map(m=>`<th>${mesLabel(m)}</th>`).join("")}<th>Total período</th></tr></thead>`;
   let rows="";
   const secRow=tt=>rows+=`<tr class="section"><td colspan="${meses.length+2}"><span class="seclbl">${tt}</span></td></tr>`;
   const bloque=(sec,chip)=>pg.filter(x=>x.sec===sec).sort((a,b)=>ordenEnBloque(a.grupo)-ordenEnBloque(b.grupo)).forEach(x=>rows+=fila(x.grupo,chip,x.letra,x.serie,meses,x.tot));
-  const netoSerie=secs=>{const o={};meses.forEach(m=>o[m]=pg.filter(x=>secs.includes(x.sec)).reduce((s,x)=>s+(x.movim==="INGRESOS"?x.serie[m]:-x.serie[m]),0));return o;};
   secRow("Ventas");bloque("VENTAS","c-ing");
-  const margenS=netoSerie(["VENTAS"]);
-  rows+=fila("Margen bruto","","",margenS,meses,t.margen,"subtotal");
+  rows+=fila("Margen bruto","","",b.margen,meses,totalSerie(b.margen),"subtotal");
   secRow("Estructura");bloque("ESTRUCTURA","c-str");
-  const estrS=netoSerie(["ESTRUCTURA"]),resOpS={};meses.forEach(m=>resOpS[m]=margenS[m]+estrS[m]);
-  rows+=fila("Resultado operativo","","",resOpS,meses,t.resOp,"subtotal");
+  rows+=fila("Resultado operativo","","",b.resOp,meses,totalSerie(b.resOp),"subtotal");
   secRow("Otros resultados (servicios, logística y otros — también fluctúan mucho, se miran aparte)");bloque("SERVICIOS","c-otr");
-  const otrosS=netoSerie(["SERVICIOS"]);
-  rows+=fila("Otros resultados","","",otrosS,meses,t.otros,"subtotal");
+  rows+=fila("Otros resultados","","",b.otros,meses,totalSerie(b.otros),"subtotal");
+  rows+=fila("Resultado neto (sin inversiones)","","",b.resNetoSinInv,meses,totalSerie(b.resNetoSinInv),"subtotal");
   secRow("Inversiones");bloque("INVERSIONES","c-otr");
-  const invS=netoSerie(["INVERSIONES"]),resNS={};meses.forEach(m=>resNS[m]=resOpS[m]+otrosS[m]+invS[m]);
-  rows+=fila("Resultado neto","","",resNS,meses,t.resNeto,"result");
-  const otros=pg.filter(x=>x.sec==="OTROS");
-  if(otros.length){ secRow("Sin clasificar (revisar GRUPO_MOVIM)"); otros.forEach(x=>rows+=fila(x.grupo,"","",x.serie,meses,x.tot)); }
+  rows+=fila("Resultado neto + inversiones","","",b.resNeto,meses,totalSerie(b.resNeto),"result");
+  const otrosNC=pg.filter(x=>x.sec==="OTROS");
+  if(otrosNC.length){ secRow("Sin clasificar (revisar GRUPO_MOVIM)"); otrosNC.forEach(x=>rows+=fila(x.grupo,"","",x.serie,meses,x.tot)); }
   secRow("Excluidos del resultado");bloque("EXCLUIDO","c-exc");
   document.getElementById("tabla").innerHTML=head+"<tbody>"+rows+"</tbody>";
 }
 function baseOpts(){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:12,font:{size:11},color:"#6C6557"}}},scales:{x:{grid:{display:false},ticks:{color:"#8B8473",font:{size:11}}},y:{grid:{color:"#EFE9DA"},ticks:{color:"#8B8473",font:{size:11},callback:v=>{const a=Math.abs(v);return a>=1e9?(v/1e9).toFixed(1)+"MM":a>=1e6?(v/1e6).toFixed(0)+"M":v;}}}}};}
-function renderCharts(pg,meses){
-  const ing=meses.map(m=>pg.filter(x=>x.movim==="INGRESOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
-  const gas=meses.map(m=>pg.filter(x=>x.movim==="GASTOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
-  const res=meses.map((m,i)=>ing[i]-gas[i]),labels=meses.map(mesLabel);
+const CHSEL_LBL={margen:"Margen bruto (Ventas)",resOp:"Resultado operativo",otros:"Otros resultados",resNetoSinInv:"Resultado neto (sin inversiones)",inversiones:"Inversiones",resNeto:"Resultado neto + inversiones"};
+function renderCharts(pg,meses,bloques){
+  const labels=meses.map(mesLabel), sel=document.getElementById("chSel").value;
   if(chMes)chMes.destroy();
-  chMes=new Chart(document.getElementById("chMes"),{data:{labels,datasets:[
-    {type:"bar",label:"Ingresos",data:ing,backgroundColor:"#9BC0A4",borderRadius:4},
-    {type:"bar",label:"Gastos",data:gas,backgroundColor:"#D7A293",borderRadius:4},
-    {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3}]},options:baseOpts()});
+  if(sel==="todo"){
+    const ing=meses.map(m=>pg.filter(x=>x.movim==="INGRESOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
+    const gas=meses.map(m=>pg.filter(x=>x.movim==="GASTOS"&&x.sec!=="EXCLUIDO").reduce((s,x)=>s+x.serie[m],0));
+    const res=meses.map((m,i)=>ing[i]+gas[i]); // gas ya viene en negativo
+    chMes=new Chart(document.getElementById("chMes"),{data:{labels,datasets:[
+      {type:"bar",label:"Ingresos",data:ing,backgroundColor:"#9BC0A4",borderRadius:4},
+      {type:"bar",label:"Gastos",data:gas,backgroundColor:"#D7A293",borderRadius:4},
+      {type:"line",label:"Resultado",data:res,borderColor:"#26241F",backgroundColor:"#26241F",tension:.3,pointRadius:3}]},options:baseOpts()});
+  }else{
+    const serie=bloques[sel],data=meses.map(m=>serie[m]);
+    chMes=new Chart(document.getElementById("chMes"),{type:"bar",data:{labels,datasets:[
+      {label:CHSEL_LBL[sel],data,backgroundColor:data.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:Object.assign(baseOpts(),{plugins:{legend:{display:false}}})});
+  }
   const L=["A","B","C","D","G","I"],nom={A:"Proyectos (A)",B:"Alq. módulo (B)",C:"Alq. reefer (C)",D:"Viv. modular (D)",G:"Serv. terc. (G)",I:"Logística (I)"};
-  const netos=L.map(l=>pg.filter(x=>x.letra===l).reduce((s,x)=>s+(x.movim==="INGRESOS"?x.tot:-x.tot),0));
+  const netos=L.map(l=>pg.filter(x=>x.letra===l).reduce((s,x)=>s+x.tot,0));
   if(chLinea)chLinea.destroy();
   chLinea=new Chart(document.getElementById("chLinea"),{type:"bar",data:{labels:L.map(l=>nom[l]),datasets:[{label:"Resultado",data:netos,backgroundColor:netos.map(v=>v>=0?"#9BC0A4":"#D7A293"),borderRadius:4}]},options:Object.assign(baseOpts(),{indexAxis:"y",plugins:{legend:{display:false}}})});
 }
@@ -633,6 +655,7 @@ function initEerrUI(){
   DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
   f.value=0;t.value=DATA.meses.length-1;
   ["cur","from","to"].forEach(id=>document.getElementById(id).addEventListener("change",recompute));
+  document.getElementById("chSel").addEventListener("change",recompute);
   document.getElementById("tablaCsv").addEventListener("click",()=>{
     const curLbl=["pesos","usd_oficial","usd_billete","axi"][+document.getElementById("cur").value]||"tabla";
     const f=document.getElementById("from"),t=document.getElementById("to");
