@@ -191,7 +191,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
   <span class="badge">✓ validado vs TD · AXI ancla abr-26 · sin rezago</span>
 </header>
 <div class="updbar"><button class="btn updbtn" id="updRawBtn" style="background:#3d5a80">⟳ Cargar informe Tango (crudo)</button><input type="file" id="updRawFile" accept=".xlsx" style="display:none"><span id="updMsg" class="updmsg">Subí el informe crudo de Consultas Externas de Tango (18 columnas), tal cual se descarga — es el único archivo que alimenta esta app.</span></div>
-<div class="updbar"><div class="lock" style="margin-right:0"><span id="histLockState">Histórico: sin bloqueo</span><select id="histLockMes" style="display:none"></select><input id="histLockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="histLockBtn">Bloquear histórico (Gerencia)</button></div><span id="histLockMsg" class="updmsg">Elegí el último mes que querés dejar fijo (por ej. mar-25): ese mes y todos los anteriores quedan protegidos — ninguna carga posterior del crudo (EERR, Presupuesto·Estructura ni Proyectos/CMV) va a volver a tocarlos.</span></div>
+<div class="updbar"><div class="lock" style="margin-right:0"><span id="histLockState">Histórico: sin bloqueo</span><label for="histLockMes" style="font-size:12.5px;color:var(--muted)">Bloquear hasta:</label><select id="histLockMes"></select><input id="histLockKey" class="lockkey" type="password" placeholder="Clave"><button class="lockbtn" id="histLockBtn">Aplicar</button></div><span id="histLockMsg" class="updmsg">Elegí el último mes que querés dejar fijo (por ej. mar-25), ingresá la clave y hacé clic en "Aplicar": ese mes y todos los anteriores quedan protegidos — ninguna carga posterior del crudo (EERR, Presupuesto·Estructura ni Proyectos/CMV) va a volver a tocarlos ni borrarlos. El desplegable siempre incluye el último mes cargado. Mientras no hagas clic en "Aplicar", ningún cambio queda guardado.</span></div>
 
 <div id="view-eerr">
   <div class="controls">
@@ -701,8 +701,8 @@ function initEerrUI(){
     const desde=(mesLabel(DATA.meses[+f.value]||"")||"").replace(/[^a-z0-9]/gi,""),hasta=(mesLabel(DATA.meses[+t.value]||"")||"").replace(/[^a-z0-9]/gi,"");
     exportTablaGen("tabla",`estado_resultados_${curLbl}_${desde}_${hasta}`);
   });
-  document.getElementById("histLockBtn").addEventListener("click",onHistLockClick);
-  document.getElementById("histLockKey").addEventListener("keydown",e=>{if(e.key==="Enter")onHistLockClick();});
+  document.getElementById("histLockBtn").addEventListener("click",onHistLockAplicar);
+  document.getElementById("histLockKey").addEventListener("keydown",e=>{if(e.key==="Enter")onHistLockAplicar();});
   renderHistLockUI();
   try{recompute();}catch(e){console.warn("eerr:",e);}
 }
@@ -798,27 +798,22 @@ async function cargarClave(clave){
 const HIST_LOCK={hasta:null};
 function mesBloqueado(ym){ return !!(HIST_LOCK.hasta && ym<=HIST_LOCK.hasta); }
 function renderHistLockUI(){
-  const st=document.getElementById("histLockState"),b=document.getElementById("histLockBtn");
+  // El desplegable siempre muestra el estado real (el mes bloqueado actual, o "Sin bloqueo") y
+  // siempre incluye todos los meses cargados -- no depende de haber hecho clic en nada antes.
+  const st=document.getElementById("histLockState"),sel=document.getElementById("histLockMes");
   if(st) st.textContent=HIST_LOCK.hasta?("Histórico bloqueado hasta: "+mesLabel(HIST_LOCK.hasta)):"Histórico: sin bloqueo";
-  if(b) b.textContent=HIST_LOCK.hasta?"Modificar (Gerencia)":"Bloquear histórico (Gerencia)";
+  if(sel){
+    sel.innerHTML=""; sel.add(new Option("Sin bloqueo","")); DATA.meses.forEach(m=>sel.add(new Option(mesLabel(m),m)));
+    sel.value=HIST_LOCK.hasta||"";
+  }
 }
-function onHistLockClick(){
+function onHistLockAplicar(){
   const sel=document.getElementById("histLockMes"),inp=document.getElementById("histLockKey");
-  if(sel.style.display==="none"){
-    sel.innerHTML=""; sel.add(new Option("Sin bloqueo (desbloquear)",""));
-    DATA.meses.forEach(m=>sel.add(new Option(mesLabel(m),m)));
-    if(HIST_LOCK.hasta) sel.value=HIST_LOCK.hasta;
-    sel.style.display=""; inp.style.display=""; inp.value=""; inp.placeholder="Clave"; inp.focus();
-    return;
-  }
-  if(inp.value===CLAVE_GERENCIA){
-    HIST_LOCK.hasta=sel.value||null;
-    guardarClave('HIST_LOCK',HIST_LOCK);
-    sel.style.display="none"; inp.style.display="none"; inp.value=""; inp.placeholder="Clave";
-    renderHistLockUI();
-  }else{
-    inp.value=""; inp.placeholder="Clave incorrecta"; inp.focus();
-  }
+  if(inp.value!==CLAVE_GERENCIA){ inp.value=""; inp.placeholder="Clave incorrecta"; inp.focus(); return; }
+  HIST_LOCK.hasta=sel.value||null;
+  guardarClave('HIST_LOCK',HIST_LOCK);
+  inp.value=""; inp.placeholder="Clave";
+  renderHistLockUI();
 }
 async function guardarTodoEnSupabase(){
   await Promise.all([
@@ -1703,8 +1698,8 @@ async function onCargarInformeCrudo(file){
     const mesesQueDesaparecen=mesesActuales.filter(m=>!mesesArchivoSet.has(m));
     if(mesesQueDesaparecen.length){
       const lista=mesesQueDesaparecen.map(mesLabel).join(", ");
-      const ok=confirm("Este archivo NO incluye "+mesesQueDesaparecen.length+" mes(es) que ya estaban cargados y no están bloqueados: "+lista+".\n\nSi continuás, esos meses se van a BORRAR de Estado de Resultados, Presupuesto·Estructura y Proyectos/CMV (a menos que primero los bloquees con \"Bloquear histórico\").\n\n¿Querés continuar de todos modos?");
-      if(!ok){ msgEl.className="updmsg"; msgEl.textContent="Carga cancelada: no se modificó nada. Si querés conservar esos meses, primero usá \"Bloquear histórico (Gerencia)\" y después volvé a subir este archivo."; return; }
+      const ok=confirm("Este archivo NO incluye "+mesesQueDesaparecen.length+" mes(es) que ya estaban cargados y no están bloqueados: "+lista+".\n\nSi continuás, esos meses se van a BORRAR de Estado de Resultados, Presupuesto·Estructura y Proyectos/CMV (a menos que primero los bloquees con \"Bloquear hasta: \" + Aplicar).\n\n¿Querés continuar de todos modos?");
+      if(!ok){ msgEl.className="updmsg"; msgEl.textContent="Carga cancelada: no se modificó nada. Si querés conservar esos meses, primero elegí el mes en \"Bloquear hasta:\", ingresá la clave y hacé clic en \"Aplicar\" — después volvé a subir este archivo."; return; }
     }
     mergeEERRIntoData(res);
     const resCuentas=parseRawLedgerCuentas(rows);
@@ -1718,6 +1713,7 @@ async function onCargarInformeCrudo(file){
     DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
     f.value=0;t.value=DATA.meses.length-1;
     recompute();
+    renderHistLockUI();
     try{
       const pd=document.getElementById("pDesde"),ph=document.getElementById("pHasta"),pm=pMonths();
       pd.innerHTML="";ph.innerHTML="";
