@@ -944,13 +944,18 @@ async function initDic(){
    promedio despues, ver BILL_CORTE_PROMEDIO). Promedio en la tabla es SIEMPRE compra/venta simple, para que
    se pueda comparar contra el valor que la app efectivamente usa (columna "Usado por la app"). */
 function tablaMonedaDic(raw,val,desde,hasta){
-  const fechas=Object.keys(val||{}).sort().filter(d=>(!desde||d>=desde)&&(!hasta||d<=hasta));
+  const keys=Object.keys(val||{}).sort();
+  const d0=desde||keys[0], d1=hasta||keys[keys.length-1];
+  const head=`<thead><tr><th>Fecha</th><th>Compra</th><th>Venta</th><th>Promedio</th><th>Usado por la app</th></tr></thead>`;
+  if(!d0||!d1) return head+'<tbody><tr><td colspan="5" class="note">Sin datos en el rango elegido.</td></tr></tbody>';
   let rows="";
-  fechas.slice().reverse().forEach(d=>{
-    const r=(raw||{})[d]||{}, c=r.compra, v=r.venta, prom=(c!=null&&v!=null)?(c+v)/2:null;
-    rows+=`<tr><td>${d}</td><td>${c!=null?fmtTC(c):"–"}</td><td>${v!=null?fmtTC(v):"–"}</td><td>${prom!=null?fmtTC(prom):"–"}</td><td><b>${fmtTC(val[d])}</b></td></tr>`;
-  });
-  return `<thead><tr><th>Fecha</th><th>Compra</th><th>Venta</th><th>Promedio</th><th>Usado por la app</th></tr></thead><tbody>${rows||'<tr><td colspan="5" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+  for(let d=new Date(d1+"T00:00:00Z"),dIni=new Date(d0+"T00:00:00Z");d>=dIni;d.setUTCDate(d.getUTCDate()-1)){
+    const key=d.toISOString().slice(0,10);
+    const r=(raw||{})[key]||{}, c=r.compra, v=r.venta, prom=(c!=null&&v!=null)?(c+v)/2:null;
+    const usado=val[key]!=null?val[key]:buscarCotizAtras(val,key);
+    rows+=`<tr><td>${key}</td><td>${c!=null?fmtTC(c):"–"}</td><td>${v!=null?fmtTC(v):"–"}</td><td>${prom!=null?fmtTC(prom):"–"}</td><td><b>${usado!=null?fmtTC(usado):"–"}</b></td></tr>`;
+  }
+  return head+`<tbody>${rows||'<tr><td colspan="5" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
 }
 function renderDic(){
   const desde=document.getElementById("dicDesde").value, hasta=document.getElementById("dicHasta").value;
@@ -978,15 +983,27 @@ function renderDic(){
 
   document.getElementById("dicFoot").innerHTML='Mismo diccionario compartido con Compras (Supabase). "Usado por la app": Oficial siempre toma <b>venta</b>; Billete toma <b>venta</b> hasta el '+BILL_CORTE_PROMEDIO+' y <b>promedio</b> compra/venta desde ahí. El "Factor AXI" es exactamente el que aplica la app para ajustar por inflación: índice del último mes publicado (ancla, hoy '+(HIST_CAMBIARIO.facpce_last||"?")+') dividido el índice de cada mes — sin rezago.';
 }
+// Para un dia sin cotizacion propia (fin de semana, feriado), repite la del dia habil anterior
+// mas cercano -- mismo criterio que usa Micaela a mano. Busca hasta 14 dias atras antes de rendirse.
+function buscarCotizAtras(mapa,dstr,maxDias){
+  maxDias=maxDias||14;
+  const d=new Date(dstr+"T00:00:00Z");
+  for(let i=0;i<=maxDias;i++){
+    const key=d.toISOString().slice(0,10);
+    if(mapa[key]!=null) return mapa[key];
+    d.setUTCDate(d.getUTCDate()-1);
+  }
+  return null;
+}
 function tcOficFor(dstr,origen,ars,ext){
   if(origen==="Ventas"&&ext) return ars/ext;
-  if(HIST_CAMBIARIO.ofic[dstr]!=null) return HIST_CAMBIARIO.ofic[dstr];
+  const v=buscarCotizAtras(HIST_CAMBIARIO.ofic,dstr); if(v!=null) return v;
   if(LIVE_TC.ofic!=null) return LIVE_TC.ofic;
   return null;
 }
 function tcBillFor(dstr,origen,cotiz){
   if((origen==="ContaParam"||origen==="ContaOC")&&cotiz) return cotiz;
-  if(HIST_CAMBIARIO.bill[dstr]!=null) return HIST_CAMBIARIO.bill[dstr];
+  const v=buscarCotizAtras(HIST_CAMBIARIO.bill,dstr); if(v!=null) return v;
   if(LIVE_TC.bill!=null) return LIVE_TC.bill;
   return null;
 }
