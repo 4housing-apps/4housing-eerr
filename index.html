@@ -191,6 +191,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
   <span class="badge">✓ validado vs TD · AXI ancla abr-26 · sin rezago</span>
 </header>
 <div class="updbar"><button class="btn updbtn" id="updRawBtn" style="background:#3d5a80">⟳ Cargar informe Tango (crudo)</button><input type="file" id="updRawFile" accept=".xlsx" style="display:none"><span id="updMsg" class="updmsg">Subí el informe crudo de Consultas Externas de Tango (18 columnas), tal cual se descarga — es el único archivo que alimenta esta app.</span></div>
+<div class="updbar"><div class="lock" style="margin-right:0"><span id="histLockState">Histórico: sin bloqueo</span><select id="histLockMes" style="display:none"></select><input id="histLockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="histLockBtn">Bloquear histórico (Gerencia)</button></div><span id="histLockMsg" class="updmsg">Elegí el último mes que querés dejar fijo (por ej. mar-25): ese mes y todos los anteriores quedan protegidos — ninguna carga posterior del crudo (EERR, Presupuesto·Estructura ni Proyectos/CMV) va a volver a tocarlos.</span></div>
 
 <div id="view-eerr">
   <div class="controls">
@@ -700,6 +701,9 @@ function initEerrUI(){
     const desde=(mesLabel(DATA.meses[+f.value]||"")||"").replace(/[^a-z0-9]/gi,""),hasta=(mesLabel(DATA.meses[+t.value]||"")||"").replace(/[^a-z0-9]/gi,"");
     exportTablaGen("tabla",`estado_resultados_${curLbl}_${desde}_${hasta}`);
   });
+  document.getElementById("histLockBtn").addEventListener("click",onHistLockClick);
+  document.getElementById("histLockKey").addEventListener("keydown",e=>{if(e.key==="Enter")onHistLockClick();});
+  renderHistLockUI();
   try{recompute();}catch(e){console.warn("eerr:",e);}
 }
 
@@ -788,6 +792,34 @@ async function cargarClave(clave){
     return rows&&rows.length?rows[0].valor:null;
   }catch(e){ console.warn('No se pudo leer "'+clave+'" de Supabase:',e); return null; }
 }
+// Bloqueo de historico: meses <= HIST_LOCK.hasta ("AAAA-MM") no se tocan mas en ninguna carga de
+// crudo (EERR, CMV, Presupuesto). Se setea a mano una vez cargado el historico corregido, con la
+// clave de Gerencia -- ver bloquearHistorico() / #histLockBtn.
+const HIST_LOCK={hasta:null};
+function mesBloqueado(ym){ return !!(HIST_LOCK.hasta && ym<=HIST_LOCK.hasta); }
+function renderHistLockUI(){
+  const st=document.getElementById("histLockState"),b=document.getElementById("histLockBtn");
+  if(st) st.textContent=HIST_LOCK.hasta?("Histórico bloqueado hasta: "+mesLabel(HIST_LOCK.hasta)):"Histórico: sin bloqueo";
+  if(b) b.textContent=HIST_LOCK.hasta?"Modificar (Gerencia)":"Bloquear histórico (Gerencia)";
+}
+function onHistLockClick(){
+  const sel=document.getElementById("histLockMes"),inp=document.getElementById("histLockKey");
+  if(sel.style.display==="none"){
+    sel.innerHTML=""; sel.add(new Option("Sin bloqueo (desbloquear)",""));
+    DATA.meses.forEach(m=>sel.add(new Option(mesLabel(m),m)));
+    if(HIST_LOCK.hasta) sel.value=HIST_LOCK.hasta;
+    sel.style.display=""; inp.style.display=""; inp.value=""; inp.placeholder="Clave"; inp.focus();
+    return;
+  }
+  if(inp.value===CLAVE_GERENCIA){
+    HIST_LOCK.hasta=sel.value||null;
+    guardarClave('HIST_LOCK',HIST_LOCK);
+    sel.style.display="none"; inp.style.display="none"; inp.value=""; inp.placeholder="Clave";
+    renderHistLockUI();
+  }else{
+    inp.value=""; inp.placeholder="Clave incorrecta"; inp.focus();
+  }
+}
 async function guardarTodoEnSupabase(){
   await Promise.all([
     guardarClave('DATA',{grupos:DATA.grupos,meses:DATA.meses}),
@@ -800,14 +832,16 @@ async function guardarTodoEnSupabase(){
     guardarClave('PROY_CTRL_PF',PROY_CTRL_PF),
     guardarClave('PROY_CTRL_MANUAL',PROY_CTRL_MANUAL),
     guardarClave('CMV_AVISOS',CMV_AVISOS),
+    guardarClave('HIST_LOCK',HIST_LOCK),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
-    cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS')
+    cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
+    cargarClave('HIST_LOCK')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -820,6 +854,7 @@ async function cargarTodoDesdeSupabase(){
   if(ppf){ Object.assign(PROY_CTRL_PF,ppf); hubo=true; }
   if(pman){ Object.assign(PROY_CTRL_MANUAL,pman); hubo=true; }
   if(cav){ CMV_AVISOS=cav; hubo=true; }
+  if(hl){ Object.assign(HIST_LOCK,hl); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -1059,9 +1094,14 @@ function parseRawLedgerEERR(rows){
   return{meses:[...mesesSet].sort(),grupos,sinCotiz,gruposIgnorados};
 }
 function mergeEERRIntoData(res){
-  const mesesSet=new Set([...DATA.meses,...res.meses]); const meses=[...mesesSet].sort();
+  const mesesNuevos=res.meses.filter(m=>!mesBloqueado(m));
+  const mesesSet=new Set([...DATA.meses,...mesesNuevos]); const meses=[...mesesSet].sort();
   const byKey={}; DATA.grupos.forEach(g=>byKey[g.grupo+"\u241F"+g.movim]=JSON.parse(JSON.stringify(g.serie)));
-  res.grupos.forEach(g=>{const k=g.grupo+"\u241F"+g.movim; if(!byKey[k])byKey[k]={}; Object.assign(byKey[k],g.serie);});
+  res.grupos.forEach(g=>{
+    const k=g.grupo+"\u241F"+g.movim; if(!byKey[k])byKey[k]={};
+    const serieFiltrada={}; Object.keys(g.serie).forEach(m=>{ if(!mesBloqueado(m)) serieFiltrada[m]=g.serie[m]; });
+    Object.assign(byKey[k],serieFiltrada);
+  });
   const grupos=Object.keys(byKey).map(k=>{const[grupo,movim]=k.split("\u241F");return{grupo,movim,serie:byKey[k]};});
   DATA.meses=meses; DATA.grupos=grupos;
 }
@@ -1096,7 +1136,10 @@ function mergePtoRealIntoConfig(cuentasAgg){
   let n=0;
   CONFIG_PTO.forEach(c=>{
     const nuevo=cuentasAgg[c.cuenta+"\u241F"+c.grupo];
-    if(nuevo){ Object.assign(c.serie,nuevo); n++; }
+    if(nuevo){
+      const filtrado={}; Object.keys(nuevo).forEach(m=>{ if(!mesBloqueado(m)) filtrado[m]=nuevo[m]; });
+      if(Object.keys(filtrado).length){ Object.assign(c.serie,filtrado); n++; }
+    }
   });
   return n;
 }
@@ -1318,15 +1361,16 @@ let CMV_AVISOS=[];
 function aplicarCMVDesdeCrudo(resC){
   // Merge mes a mes (no reemplazo total): permite cargar una base historica una vez y despues
   // subir solo archivos de actualizacion (p.ej. desde abril/26) sin perder los meses viejos.
-  const mesesSet=new Set([...PROJ_DATA.meses,...resC.meses]);
+  const mesesNuevos=resC.meses.filter(m=>!mesBloqueado(m));
+  const mesesSet=new Set([...PROJ_DATA.meses,...mesesNuevos]);
   PROJ_DATA.meses=[...mesesSet].sort();
-  resC.meses.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
+  mesesNuevos.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
   const porCodigo={}; PROJ_DATA.aperturas.forEach(a=>porCodigo[a.codigo]=a);
   resC.aperturas.forEach(a=>{
     if(!porCodigo[a.codigo]) porCodigo[a.codigo]={codigo:a.codigo,desc:a.desc,es_bucket:a.es_bucket,mov:{}};
     const dst=porCodigo[a.codigo];
     dst.desc=a.desc; dst.es_bucket=a.es_bucket;
-    Object.keys(a.mov).forEach(m=>{ if(!dst.mov[m]) dst.mov[m]={}; Object.assign(dst.mov[m],a.mov[m]); });
+    Object.keys(a.mov).forEach(m=>{ if(mesBloqueado(m)) return; if(!dst.mov[m]) dst.mov[m]={}; Object.assign(dst.mov[m],a.mov[m]); });
   });
   PROJ_DATA.aperturas.length=0;
   Object.keys(porCodigo).sort((x,y)=>{const bx=x.startsWith("2)"),by=y.startsWith("2)");if(bx!==by)return(bx?1:0)-(by?1:0);return x<y?-1:1;}).forEach(c=>PROJ_DATA.aperturas.push(porCodigo[c]));
@@ -1650,7 +1694,9 @@ async function onCargarInformeCrudo(file){
     }catch(e){console.warn("cmv:",e);}
     const nIgnor=Object.values(res.gruposIgnorados).reduce((s,v)=>s+v,0);
     const nPend=res.sinCotiz.length;
+    const nBloq=res.meses.filter(m=>mesBloqueado(m)).length;
     let m2=`OK: EERR actualizado, ${res.meses.length} meses del informe (${res.meses[0]} a ${res.meses[res.meses.length-1]}).`;
+    if(nBloq) m2+=` 🔒 ${nBloq} mes(es) del archivo son iguales o anteriores a ${mesLabel(HIST_LOCK.hasta)} (histórico bloqueado) y NO se modificaron.`;
     m2+= dicOk ? ` Diccionario tomado de Supabase: USD Oficial hasta ${HIST_CAMBIARIO.ofic_last||"?"}, USD Billete hasta ${HIST_CAMBIARIO.bill_last||"?"}, FACPCE hasta ${HIST_CAMBIARIO.facpce_last||"?"}.` : " ⚠ No se pudo leer el diccionario de Supabase (revisa conexion o que las tablas usd_diario_oficial/idx_facpce ya existan) — se usó el histórico embebido como respaldo, puede estar desactualizado.";
     if(LIVE_TC.ofic) m2+=` Cotizacion en vivo obtenida de dolarapi.com (${LIVE_TC.fecha||"hoy"}).`; else m2+=" No se pudo conectar a dolarapi.com (revisa conexion) — fechas fuera del historico quedan sin USD/AXI.";
     if(nPend) m2+=` ⚠ ${nPend} filas sin cotizacion completa (fechas sin historico ni dato en vivo) — no se inventaron valores, quedaron en 0 para esas filas.`;
