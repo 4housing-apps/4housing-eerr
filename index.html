@@ -953,7 +953,8 @@ function tablaMonedaDic(raw,val,desde,hasta){
     const key=d.toISOString().slice(0,10);
     const r=(raw||{})[key]||{}, c=r.compra, v=r.venta, prom=(c!=null&&v!=null)?(c+v)/2:null;
     const usado=val[key]!=null?val[key]:buscarCotizAtras(val,key);
-    rows+=`<tr><td>${key}</td><td>${c!=null?fmtTC(c):"–"}</td><td>${v!=null?fmtTC(v):"–"}</td><td>${prom!=null?fmtTC(prom):"–"}</td><td><b>${usado!=null?fmtTC(usado):"–"}</b></td></tr>`;
+    const [ky,km,kd]=key.split("-"), fechaCorta=kd+"/"+km+"/"+ky.slice(2); // 2026-09-15 -> 15/09/26, mas angosto
+    rows+=`<tr><td>${fechaCorta}</td><td>${c!=null?fmtTC(c):"–"}</td><td>${v!=null?fmtTC(v):"–"}</td><td>${prom!=null?fmtTC(prom):"–"}</td><td><b>${usado!=null?fmtTC(usado):"–"}</b></td></tr>`;
   }
   return head+`<tbody>${rows||'<tr><td colspan="5" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
 }
