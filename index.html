@@ -518,7 +518,7 @@ window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBas
     const realUlt=(c.serie[ultimo]?c.serie[ultimo][cur]:0), desvUlt=realUlt-ptoMes;
     const realPer=reals.reduce((s,v)=>s+v,0), ptoPer=ptoMes*n, desvPer=realPer-ptoPer, pct=ptoPer?realPer/ptoPer:0;
     tPtoMes+=ptoMes;tRealUlt+=realUlt;tPtoPer+=ptoPer;tRealPer+=realPer;if(realPer>ptoPer)over++;
-    const cells=reals.map(v=>`<td>${v?fmt(v):"–"}</td>`).join("");
+    const cells=reals.map(v=>`<td${v>ptoMes?' class="over"':""}>${v?fmt(v):"–"}</td>`).join("");
     return `<tr>
       <td class="fz fz1 ell" title="${esc(c.cuenta)}">${c.cuenta}</td>
       <td class="fz fz2 ell" title="${esc(c.responsable||"")}">${abreviar(c.responsable)}</td>
