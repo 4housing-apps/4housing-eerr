@@ -1121,13 +1121,14 @@ function mergeEERRIntoData(res){
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
-  const cagg={};
+  const cagg={}; const mesesSet=new Set();
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<10) continue;
     const origen=S(r[0]), tipoAux=S(r[1]), grupo=S(r[3]), cuenta=S(r[9]);
     if(tipoAux!=="02 - EERR"||!GRUPO_MOVIM[grupo]) continue;
     const fecha=parseFechaCell(r[5]); if(!fecha) continue;
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
+    mesesSet.add(y);
     const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
     const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
     const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
@@ -1139,16 +1140,24 @@ function parseRawLedgerCuentas(rows){
   }
   const out={};
   Object.keys(cagg).forEach(k=>{ const serie={}; Object.keys(cagg[k]).sort().forEach(y=>serie[y]=cagg[k][y].map(v=>Math.round(v*1e4)/1e4)); out[k]=serie; });
-  return out; // "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
+  return {cuentas:out, meses:[...mesesSet].sort()}; // cuentas: "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
 }
-function mergePtoRealIntoConfig(cuentasAgg){
+function mergePtoRealIntoConfig(resCuentas){
+  // Misma logica que mergeEERRIntoData: el archivo reemplaza (no mezcla) los meses no bloqueados
+  // que cubre -- si una cuenta no tiene movimientos ese mes en el archivo nuevo, queda en 0 (no se
+  // arrastra el valor de una carga anterior). Los meses bloqueados por HIST_LOCK no se tocan.
+  const cuentasAgg=resCuentas.cuentas, mesesArchivo=resCuentas.meses;
+  const mesesNuevos=mesesArchivo.filter(m=>!mesBloqueado(m));
   let n=0;
   CONFIG_PTO.forEach(c=>{
-    const nuevo=cuentasAgg[c.cuenta+"\u241F"+c.grupo];
-    if(nuevo){
-      const filtrado={}; Object.keys(nuevo).forEach(m=>{ if(!mesBloqueado(m)) filtrado[m]=nuevo[m]; });
-      if(Object.keys(filtrado).length){ Object.assign(c.serie,filtrado); n++; }
-    }
+    const nuevo=cuentasAgg[c.cuenta+"\u241F"+c.grupo]||{};
+    const serieBloqueada={};
+    Object.keys(c.serie).forEach(m=>{ if(mesBloqueado(m)) serieBloqueada[m]=c.serie[m]; });
+    const serieNueva={...serieBloqueada};
+    let tocado=false;
+    mesesNuevos.forEach(m=>{ serieNueva[m]=nuevo[m]||[0,0,0,0]; tocado=true; });
+    c.serie=serieNueva;
+    if(tocado) n++;
   });
   return n;
 }
@@ -1368,21 +1377,35 @@ async function onCargarSaldoAnterior(file){
 const BUCKETS_ORDER_DEFAULT=["2) ACOPIO","2) EPP","2) CONSUM","2) GAS","2) GASOIL"];
 let CMV_AVISOS=[];
 function aplicarCMVDesdeCrudo(resC){
-  // Merge mes a mes (no reemplazo total): permite cargar una base historica una vez y despues
-  // subir solo archivos de actualizacion (p.ej. desde abril/26) sin perder los meses viejos.
+  // Igual criterio que mergeEERRIntoData/mergePtoRealIntoConfig: el archivo reemplaza (no mezcla)
+  // los meses no bloqueados que cubre -- si un proyecto/bucket no tiene movimientos ese mes en el
+  // archivo nuevo, se borra (no queda "pegado" de una carga anterior). Los meses <= HIST_LOCK.hasta
+  // se conservan tal cual, vengan o no en el archivo nuevo.
   const mesesNuevos=resC.meses.filter(m=>!mesBloqueado(m));
-  const mesesSet=new Set([...PROJ_DATA.meses,...mesesNuevos]);
-  PROJ_DATA.meses=[...mesesSet].sort();
+  const mesesViejosBloqueados=PROJ_DATA.meses.filter(m=>mesBloqueado(m));
+  PROJ_DATA.meses=[...new Set([...mesesViejosBloqueados,...mesesNuevos])].sort();
   mesesNuevos.forEach(ym=>{ const f=axiFactorFor(ym); PROJ_DATA.mult[ym]=f!=null?f:1; });
-  const porCodigo={}; PROJ_DATA.aperturas.forEach(a=>porCodigo[a.codigo]=a);
+  const porCodigo={};
+  PROJ_DATA.aperturas.forEach(a=>{
+    const movBloqueado={};
+    Object.keys(a.mov).forEach(m=>{
+      const serieBloqueada={};
+      mesesViejosBloqueados.forEach(ym=>{ if(a.mov[m][ym]!=null) serieBloqueada[ym]=a.mov[m][ym]; });
+      if(Object.keys(serieBloqueada).length) movBloqueado[m]=serieBloqueada;
+    });
+    porCodigo[a.codigo]={codigo:a.codigo,desc:a.desc,es_bucket:a.es_bucket,mov:movBloqueado};
+  });
   resC.aperturas.forEach(a=>{
     if(!porCodigo[a.codigo]) porCodigo[a.codigo]={codigo:a.codigo,desc:a.desc,es_bucket:a.es_bucket,mov:{}};
     const dst=porCodigo[a.codigo];
     dst.desc=a.desc; dst.es_bucket=a.es_bucket;
-    Object.keys(a.mov).forEach(m=>{ if(mesBloqueado(m)) return; if(!dst.mov[m]) dst.mov[m]={}; Object.assign(dst.mov[m],a.mov[m]); });
+    Object.keys(a.mov).forEach(m=>{
+      if(!dst.mov[m]) dst.mov[m]={};
+      Object.keys(a.mov[m]).forEach(ym=>{ if(!mesBloqueado(ym)) dst.mov[m][ym]=a.mov[m][ym]; });
+    });
   });
   PROJ_DATA.aperturas.length=0;
-  Object.keys(porCodigo).sort((x,y)=>{const bx=x.startsWith("2)"),by=y.startsWith("2)");if(bx!==by)return(bx?1:0)-(by?1:0);return x<y?-1:1;}).forEach(c=>PROJ_DATA.aperturas.push(porCodigo[c]));
+  Object.keys(porCodigo).filter(c=>Object.values(porCodigo[c].mov).some(s=>Object.keys(s).length)).sort((x,y)=>{const bx=x.startsWith("2)"),by=y.startsWith("2)");if(bx!==by)return(bx?1:0)-(by?1:0);return x<y?-1:1;}).forEach(c=>PROJ_DATA.aperturas.push(porCodigo[c]));
   const codigos=new Set(PROJ_DATA.aperturas.filter(a=>a.es_bucket).map(a=>a.codigo));
   const orden=BUCKETS_ORDER_DEFAULT.filter(c=>codigos.has(c));
   [...codigos].filter(c=>!orden.includes(c)).sort().forEach(c=>orden.push(c));
