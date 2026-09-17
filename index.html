@@ -1698,6 +1698,14 @@ async function onCargarInformeCrudo(file){
     await cargarClasifProyectosSupabase();
     await fetchLiveTC();
     const res=parseRawLedgerEERR(rows);
+    const mesesActuales=DATA.meses.filter(m=>!mesBloqueado(m));
+    const mesesArchivoSet=new Set(res.meses);
+    const mesesQueDesaparecen=mesesActuales.filter(m=>!mesesArchivoSet.has(m));
+    if(mesesQueDesaparecen.length){
+      const lista=mesesQueDesaparecen.map(mesLabel).join(", ");
+      const ok=confirm("Este archivo NO incluye "+mesesQueDesaparecen.length+" mes(es) que ya estaban cargados y no están bloqueados: "+lista+".\n\nSi continuás, esos meses se van a BORRAR de Estado de Resultados, Presupuesto·Estructura y Proyectos/CMV (a menos que primero los bloquees con \"Bloquear histórico\").\n\n¿Querés continuar de todos modos?");
+      if(!ok){ msgEl.className="updmsg"; msgEl.textContent="Carga cancelada: no se modificó nada. Si querés conservar esos meses, primero usá \"Bloquear histórico (Gerencia)\" y después volvé a subir este archivo."; return; }
+    }
     mergeEERRIntoData(res);
     const resCuentas=parseRawLedgerCuentas(rows);
     const nCuentas=mergePtoRealIntoConfig(resCuentas);
