@@ -80,7 +80,7 @@ select,.ctl input{border:1px solid var(--line);border-radius:10px;padding:9px 12
 .kpi .k-val{font-size:21px;font-weight:700;margin-top:4px;letter-spacing:-.02em;}
 .kpi .k-sub{font-size:11px;color:var(--muted);margin-top:3px;}
 .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:20px;}
-.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:16px;margin-bottom:20px;}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 18px;}
 .panel h3{margin:0 0 10px;font-size:14px;font-weight:700;}
 .chart-box{position:relative;height:280px;}
@@ -965,9 +965,9 @@ function renderDic(){
     const v=HIST_CAMBIARIO.facpce[m], anterior=HIST_CAMBIARIO.facpce[idxDesc[i+1]];
     const varm=anterior?((v/anterior-1)*100):null;
     const factorAxi=idxAncla?(idxAncla/v):null;
-    rowsIdx+=`<tr><td>${m}</td><td>${fmtTC(v)}</td><td>${varm!=null?varm.toFixed(2)+"%":"–"}</td><td><b>${factorAxi!=null?factorAxi.toFixed(6):"–"}</b></td></tr>`;
+    rowsIdx+=`<tr><td>${m}</td><td>${fmtTC(v)}</td><td>${varm!=null?varm.toFixed(2)+"%":"–"}</td><td><b>${factorAxi!=null?factorAxi.toFixed(4):"–"}</b></td></tr>`;
   });
-  document.getElementById("dicTablaIdx").innerHTML=`<thead><tr><th>Período</th><th>Índice</th><th>Var. mensual</th><th>Factor AXI (ancla ÷ mes)</th></tr></thead><tbody>${rowsIdx||'<tr><td colspan="4" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
+  document.getElementById("dicTablaIdx").innerHTML=`<thead><tr><th>Período</th><th>Índice</th><th>Var. mensual</th><th>Factor AXI</th></tr></thead><tbody>${rowsIdx||'<tr><td colspan="4" class="note">Sin datos en el rango elegido.</td></tr>'}</tbody>`;
 
   document.getElementById("dicKpis").innerHTML=[
     ["USD Oficial hasta",HIST_CAMBIARIO.ofic_last||"–"],
