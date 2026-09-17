@@ -1094,15 +1094,24 @@ function parseRawLedgerEERR(rows){
   return{meses:[...mesesSet].sort(),grupos,sinCotiz,gruposIgnorados};
 }
 function mergeEERRIntoData(res){
+  // Cada carga de crudo representa la verdad completa para los meses NO bloqueados: si un mes
+  // (no bloqueado) que antes tenia datos ya no viene en el archivo nuevo, se borra (no queda
+  // "pegado" de una carga anterior). Los meses bloqueados (HIST_LOCK) nunca se tocan, vengan o no
+  // en el archivo nuevo.
   const mesesNuevos=res.meses.filter(m=>!mesBloqueado(m));
-  const mesesSet=new Set([...DATA.meses,...mesesNuevos]); const meses=[...mesesSet].sort();
-  const byKey={}; DATA.grupos.forEach(g=>byKey[g.grupo+"\u241F"+g.movim]=JSON.parse(JSON.stringify(g.serie)));
+  const mesesViejosBloqueados=DATA.meses.filter(m=>mesBloqueado(m));
+  const mesesSet=new Set([...mesesViejosBloqueados,...mesesNuevos]); const meses=[...mesesSet].sort();
+  const byKey={};
+  DATA.grupos.forEach(g=>{
+    const serieBloqueada={}; mesesViejosBloqueados.forEach(m=>{ if(g.serie[m]!=null) serieBloqueada[m]=g.serie[m]; });
+    byKey[g.grupo+"\u241F"+g.movim]=serieBloqueada;
+  });
   res.grupos.forEach(g=>{
     const k=g.grupo+"\u241F"+g.movim; if(!byKey[k])byKey[k]={};
     const serieFiltrada={}; Object.keys(g.serie).forEach(m=>{ if(!mesBloqueado(m)) serieFiltrada[m]=g.serie[m]; });
     Object.assign(byKey[k],serieFiltrada);
   });
-  const grupos=Object.keys(byKey).map(k=>{const[grupo,movim]=k.split("\u241F");return{grupo,movim,serie:byKey[k]};});
+  const grupos=Object.keys(byKey).filter(k=>Object.keys(byKey[k]).length).map(k=>{const[grupo,movim]=k.split("\u241F");return{grupo,movim,serie:byKey[k]};});
   DATA.meses=meses; DATA.grupos=grupos;
 }
 /* Presupuesto\u00B7Estructura: mismas filas "02 - EERR" que el EERR, pero agregadas por cuenta puntual
