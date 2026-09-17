@@ -946,7 +946,7 @@ async function initDic(){
 function tablaMonedaDic(raw,val,desde,hasta){
   const keys=Object.keys(val||{}).sort();
   const d0=desde||keys[0], d1=hasta||keys[keys.length-1];
-  const head=`<thead><tr><th>Fecha</th><th>Compra</th><th>Venta</th><th>Promedio</th><th>Usado por la app</th></tr></thead>`;
+  const head=`<thead><tr><th>Fecha</th><th>Compra</th><th>Venta</th><th>Promedio</th><th style="white-space:normal;max-width:70px">Usado por la app</th></tr></thead>`;
   if(!d0||!d1) return head+'<tbody><tr><td colspan="5" class="note">Sin datos en el rango elegido.</td></tr></tbody>';
   let rows="";
   for(let d=new Date(d1+"T00:00:00Z"),dIni=new Date(d0+"T00:00:00Z");d>=dIni;d.setUTCDate(d.getUTCDate()-1)){
