@@ -113,11 +113,27 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
 #pTabla tbody td.fz{z-index:2;background:var(--card);}
 #pTabla thead th.fz{z-index:6;}
 #pTabla tr.result td.fz{background:#EDEBE1;}
-.fz1{left:0;min-width:150px;max-width:150px;}
-.fz2{left:150px;min-width:100px;max-width:100px;}
-.fz3{left:250px;min-width:74px;}
-.fz4{left:324px;min-width:92px;}
-.fz5{left:416px;min-width:72px;}
+/* El "left" de las columnas fijas (fz) ya no es un valor fijo por CSS -- se recalcula en JS
+   (actualizarStickyPto) segun el ancho real de cada columna, porque ahora se pueden redimensionar
+   a mano y la de "Pto Pesos" se puede ocultar. Ver esa función. */
+.fz1{min-width:150px;max-width:220px;}
+.fz2{min-width:44px;max-width:70px;text-align:center!important;}
+.fz3{min-width:52px;}
+.fz4{min-width:92px;}
+.fz5{min-width:76px;}
+/* Distinción visual entre columnas de gasto real (fondo plano) y columnas de info/cálculo
+   (Pto, desvíos, acumulado, etc. -- fondo tenue para que se note de un vistazo cuál es cuál). */
+#pTabla td.info,#pTabla th.info{background:#F7F1E4;}
+#pTabla tbody td.info{background:#F7F1E4;}
+#pTabla tr.result td.info{background:#EFE6D0;}
+#pTabla td.real,#pTabla th.real{background:var(--card);}
+/* Columnas redimendisonables: tirador en el borde derecho del encabezado. */
+table.grid{position:relative;}
+table.grid th{position:relative;}
+table.grid th .col-resizer{position:absolute;top:0;right:0;width:8px;height:100%;cursor:col-resize;z-index:8;}
+table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rgba(95,122,78,.25);}
+.vig-detail td{border-bottom:1px solid var(--line);}
+.vig-btn:hover{opacity:1!important;}
 .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .bar{display:flex;gap:8px;justify-content:flex-end;margin:4px 0 10px;}
 .btn{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;}
@@ -232,6 +248,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
     <div class="ctl"><label for="pFiltro">Cuentas</label><select id="pFiltro"><option value="datos">Con presupuesto o gasto</option><option value="todas">Todas las cuentas</option></select></div>
     <div class="ctl"><label for="pDesde">Desde</label><select id="pDesde"></select></div>
     <div class="ctl"><label for="pHasta">Hasta</label><select id="pHasta"></select></div>
+    <div class="ctl"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;padding:9px 0"><input type="checkbox" id="pTogglePtoPesos" checked> Mostrar columna "Pto Pesos"</label></div>
     <span class="note">Cargá el presupuesto en <b>pesos de hoy</b> (fecha base abajo). En <b>pesos</b> se muestra plano; en <b>AXI</b> ajustado por inflación; en <b>USD</b> queda fijo al cierre del 30/06. Editable; se guarda en este navegador.</span>
   </div>
   <div id="ptoCfg" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
@@ -326,7 +343,6 @@ const MESES=DATA.meses;
 const fmt=v=>new Intl.NumberFormat("es-AR",{maximumFractionDigits:0}).format(Math.round(v||0));
 const fmtM=v=>{const a=Math.abs(v||0);return a>=1e9?(v/1e9).toFixed(2)+" MM":a>=1e6?(v/1e6).toFixed(1)+" M":fmt(v);};
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;");
-function abreviar(n){if(!n)return"–";const p=n.split(",");if(p.length<2)return n;const ini=p[1].trim().split(/\s+/).filter(Boolean).map(w=>w[0].toUpperCase()+".").join("");return p[0].trim()+(ini?" "+ini:"");}
 
 /* ===== EERR =====
    Estructura visual pedida por Micaela: Ventas (A) aparte -- ahí varía mucho mes a mes y por eso
@@ -475,12 +491,87 @@ function onLockClick(){
   if(inp.value===CLAVE_GERENCIA)setLock(true);
   else{inp.value="";inp.placeholder="Clave incorrecta";inp.focus();}
 }
+/* Presupuesto por vigencias: cada cuenta tiene un historial [{desde:"AAAA-MM", pto}] en vez de un
+   solo valor -- permite modificar el Pto a mitad de año (ej. se corta un alquiler) sin perder el
+   valor anterior: para cualquier mes se usa la vigencia mas reciente cuyo "desde" sea <= ese mes.
+   FECHA_BASE_DEFAULT_YM es el inicio del ejercicio (abril) usado como "desde" por defecto para
+   cuentas sin historial propio todavia, y como referencia de la columna "Pto Pesos". */
+const FECHA_BASE_DEFAULT_YM="2026-04";
+function ymFromMesAbbr(s){
+  if(!s) return null;
+  const m=(""+s).trim().toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
+  if(!m) return null;
+  const idx=MES_ABBR.indexOf(m[1]); if(idx<0) return null;
+  return "20"+m[2]+"-"+String(idx+1).padStart(2,"0");
+}
+// Reexpresa "monto" (pesos del mes origenYM) en pesos del mes destinoYM, usando el mismo indice
+// FACPCE que ya usa toda la app -- es una relacion fija entre esos dos meses puntuales (a
+// diferencia de la vista "Ajustado x inflacion", que siempre reexpresa contra el ultimo mes
+// publicado y por lo tanto cambia cada vez que sale un indice nuevo). Sin AXI para alguno de los
+// dos meses, se devuelve el monto sin ajustar (no se inventa un factor).
+function pesosEnMes(monto,origenYM,destinoYM){
+  if(!monto) return 0;
+  if(!origenYM||!destinoYM||origenYM===destinoYM) return monto;
+  const fo=axiFactorFor(origenYM), fd=axiFactorFor(destinoYM);
+  if(fo==null||fd==null) return monto;
+  return monto*(fo/fd);
+}
+function ptoVigente(key,ym){
+  const h=(OVERRIDES[key]||{}).historial;
+  if(!h||!h.length) return null;
+  let elegido=h[0];
+  for(const e of h){ if(e.desde<=ym) elegido=e; else break; }
+  return elegido;
+}
+// Pto del mes "ym" para la cuenta "key", ya en la moneda seleccionada (fCur = factor de conversion
+// vigente, igual que antes) -- toma la vigencia activa en ese mes y la reexpresa en pesos de ese mes.
+function ptoEnMes(key,ym,fCur){
+  const v=ptoVigente(key,ym);
+  if(!v) return 0;
+  return pesosEnMes(v.pto,v.desde,ym)*(fCur==null?1:fCur);
+}
 const OVERRIDES={};
+// Convierte overrides con la forma vieja ({base,pto}, un solo valor fijo) a la nueva ({base,
+// historial:[...]});  tambien pasa CFG.fechaBase de texto ("jun-26") a "AAAA-MM" si hiciera falta.
+// Idempotente: no toca nada que ya este en la forma nueva.
+function migrarOverrides(){
+  let hubo=false;
+  if(OVERRIDES.__cfg__ && OVERRIDES.__cfg__.fechaBase && !/^\d{4}-\d{2}$/.test(OVERRIDES.__cfg__.fechaBase)){
+    OVERRIDES.__cfg__.fechaBase=ymFromMesAbbr(OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM; hubo=true;
+  }
+  const fechaVieja=(OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM;
+  Object.keys(OVERRIDES).forEach(k=>{
+    if(k==="__cfg__") return;
+    const o=OVERRIDES[k]; if(!o||o.historial) return;
+    if(o.pto!=null){ o.historial=[{desde:fechaVieja,pto:o.pto}]; delete o.pto; hubo=true; }
+  });
+  return hubo;
+}
 async function loadOverrides(){
-  CONFIG_PTO.forEach(c=>OVERRIDES[c.key]={base:c.base,pto:c.pto_sugerido});
+  // OJO: antes esta linea pisaba SIEMPRE cada cuenta con el default de CONFIG_PTO, incluso cuando
+  // ya habia overrides reales cargados desde Supabase un momento antes (bug: cualquier Pto editado
+  // a mano se perdia en cada recarga de la app). Ahora solo pone el default si todavia no hay nada.
+  CONFIG_PTO.forEach(c=>{ if(!OVERRIDES[c.key]) OVERRIDES[c.key]={base:c.base,historial:[{desde:FECHA_BASE_DEFAULT_YM,pto:c.pto_sugerido}]}; });
   try{const r=await window.storage.get("pto_estructura_overrides_v2");if(r&&r.value)Object.assign(OVERRIDES,JSON.parse(r.value));}catch(e){}
+  if(migrarOverrides()) saveOverrides();
 }
 async function saveOverrides(){try{await window.storage.set("pto_estructura_overrides_v2",JSON.stringify(OVERRIDES));}catch(e){} guardarClave('OVERRIDES',OVERRIDES);}
+function agregarVigencia(key,desde,pto){
+  if(!OVERRIDES[key]) return;
+  if(!OVERRIDES[key].historial) OVERRIDES[key].historial=[];
+  const h=OVERRIDES[key].historial;
+  const i=h.findIndex(e=>e.desde===desde);
+  if(i>=0) h[i]={desde,pto}; else h.push({desde,pto});
+  h.sort((a,b)=>a.desde<b.desde?-1:1);
+  saveOverrides();
+}
+function iniciales(n){
+  if(!n) return "–";
+  const partes=n.split(","); const ape=(partes[0]||"").trim(), nom=(partes[1]||"").trim();
+  const apeIni=ape.split(/\s+/).filter(Boolean).map(w=>w[0].toUpperCase()).join("");
+  const nomFirst=nom.split(/\s+/).filter(Boolean)[0]||"";
+  return apeIni+(nomFirst?nomFirst[0].toUpperCase():"");
+}
 function pMonths(){const s=new Set();CONFIG_PTO.forEach(c=>Object.keys(c.serie).forEach(m=>s.add(m)));return[...s].sort();}
 async function initPto(){
   document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>showView(t.dataset.v)));
@@ -494,58 +585,293 @@ async function initPto(){
   document.getElementById("pTabla").addEventListener("change",e=>{
     if(!editable)return;const c=e.target.dataset.c;if(!c||!OVERRIDES[c])return;
     if(e.target.classList.contains("base-sel"))OVERRIDES[c].base=e.target.value;
-    if(e.target.classList.contains("pto-inp"))OVERRIDES[c].pto=((parseFloat(String(e.target.value).replace(/\./g,"").replace(/,/g,"."))||0)/(window.curPtoFac||1));
+    if(e.target.classList.contains("pto-inp")){
+      // El input muestra el Pto en pesos de la "fecha base" (ver renderPto); al editarlo se
+      // reconvierte a los pesos propios del "desde" de la ultima vigencia antes de guardar, para
+      // no perder la denominacion original de esa vigencia.
+      const mostrado=(parseFloat(String(e.target.value).replace(/\./g,"").replace(/,/g,"."))||0)/(window.curPtoFac||1);
+      const h=OVERRIDES[c].historial;
+      if(h&&h.length){
+        const ult=h[h.length-1];
+        const fechaBase=(OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM;
+        ult.pto=pesosEnMes(mostrado,fechaBase,ult.desde);
+      }
+    }
     saveOverrides();renderPto();});
+  document.getElementById("pTabla").addEventListener("click",e=>{
+    const vigBtn=e.target.closest(".vig-btn");
+    if(vigBtn){
+      const c=vigBtn.dataset.c;
+      if(PTO_VIG_OPEN.has(c))PTO_VIG_OPEN.delete(c);else PTO_VIG_OPEN.add(c);
+      renderPto();return;
+    }
+    const addBtn=e.target.closest(".vig-add-btn");
+    if(addBtn){
+      if(!editable)return;
+      const c=addBtn.dataset.c, row=addBtn.closest(".vig-detail");
+      const mesSel=row.querySelector(".vig-mes-sel"), ptoInp=row.querySelector(".vig-pto-inp");
+      const desde=mesSel.value, pto=parseFloat(String(ptoInp.value).replace(/\./g,"").replace(/,/g,"."))||0;
+      agregarVigencia(c,desde,pto);
+      renderPto();
+    }
+  });
+  const togglePto=document.getElementById("pTogglePtoPesos");
+  if(togglePto)togglePto.addEventListener("change",()=>{pMostrarPtoPesos=togglePto.checked;renderPto();});
   document.getElementById("btnCsv").addEventListener("click",exportTabla);
   document.getElementById("btnPdf").addEventListener("click",()=>window.print());
   document.getElementById("btnLock").addEventListener("click",onLockClick);
   document.getElementById("lockKey").addEventListener("keydown",e=>{if(e.key==="Enter")onLockClick();});
   setLock(false);
 }
-window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:"jun-26",tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
+window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
+// Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
+// no tiene datos cargados, ej. "a partir de octubre el alquiler pasa a 0").
+function mesesConFuturo(extra){
+  const base=pMonths(); if(!base.length) return base;
+  let [y,m]=base[base.length-1].split("-").map(Number);
+  const out=base.slice();
+  for(let i=0;i<extra;i++){ m++; if(m>12){m=1;y++;} out.push(y+"-"+String(m).padStart(2,"0")); }
+  return out;
+}
+/* ===== Filtro/orden tipo Excel para #pTabla (Cuenta/Responsable/Base) — mismo patron que Compras ===== */
+const PTO_COL_FILTRO={}; let PTO_SORT=null;
+function ptoColUnique(rows,col){
+  const s=new Set(); let hasEmpty=false;
+  rows.forEach(c=>{ const v=col==="responsable"?iniciales(c.responsable):(col==="cuenta"?c.cuenta:(OVERRIDES[c.key]||{}).base); if(v!=null&&v!=="") s.add(String(v)); else hasEmpty=true; });
+  const vals=[...s].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}));
+  return hasEmpty?['',...vals]:vals;
+}
+function ptoColFilterActive(col){ const f=PTO_COL_FILTRO[col]; return !!(f&&f.length); }
+function ptoRowPass(c){
+  return Object.keys(PTO_COL_FILTRO).every(col=>{
+    const allow=PTO_COL_FILTRO[col]; if(!allow||!allow.length) return true;
+    const v=col==="responsable"?iniciales(c.responsable):(col==="cuenta"?c.cuenta:(OVERRIDES[c.key]||{}).base);
+    return allow.includes(String(v==null?"":v));
+  });
+}
+function closePtoColFilter(){ const p=document.getElementById('ptoFilterPop'); if(p) p.remove(); document.removeEventListener('mousedown', ptoColFilterOutside, true); }
+function ptoColFilterOutside(e){ const p=document.getElementById('ptoFilterPop'); if(p && !p.contains(e.target) && !(e.target.closest && e.target.closest('.ptofbtn'))) closePtoColFilter(); }
+function openPtoColFilter(col,ev,rows){
+  ev.stopPropagation(); const btn=ev.currentTarget; closePtoColFilter();
+  const vals=ptoColUnique(rows,col);
+  const sel=PTO_COL_FILTRO[col]?new Set(PTO_COL_FILTRO[col]):new Set(vals);
+  const item=v=>'<label class="ptofitem" data-v="'+esc(v)+'" style="display:flex;align-items:center;gap:6px;padding:3px 4px;cursor:pointer;font-size:12px"><input type="checkbox" class="ptofchk" value="'+esc(v)+'" '+(sel.has(v)?'checked':'')+'>'+(v===''?'<em style="color:var(--muted)">(Vacío)</em>':esc(v))+'</label>';
+  const pop=document.createElement('div'); pop.id='ptoFilterPop';
+  pop.style.cssText='position:absolute;z-index:9999;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;min-width:190px;max-width:280px;font-size:12.5px';
+  pop.innerHTML='<input type="text" placeholder="Buscar" oninput="ptoColFilterSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:6px;font-size:12.5px">'
+    +'<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-weight:700;border-bottom:1px solid var(--line);margin-bottom:4px;cursor:pointer"><input type="checkbox" '+(sel.size===vals.length?'checked':'')+' onchange="ptoColFilterToggleAll(this.checked)">(Seleccionar todo)</label>'
+    +'<div id="ptofList" style="max-height:220px;overflow:auto">'+vals.map(item).join('')+'</div>'
+    +'<div style="display:flex;gap:6px;margin-top:8px"><button class="btn" style="flex:1;padding:6px" onclick="ptoColFilterApply(\''+col+'\')">Aplicar</button><button class="btn" style="flex:1;padding:6px" onclick="ptoColFilterClear(\''+col+'\')">Limpiar</button></div>';
+  document.body.appendChild(pop);
+  const r=btn.getBoundingClientRect(); const vw=document.documentElement.clientWidth;
+  pop.style.top=(window.scrollY+r.bottom+4)+'px'; pop.style.left=(window.scrollX+Math.max(8,Math.min(r.left, vw-290)))+'px';
+  setTimeout(()=>document.addEventListener('mousedown', ptoColFilterOutside, true),0);
+}
+function ptoColFilterSearch(q){ q=(q||'').toLowerCase(); document.querySelectorAll('#ptofList .ptofitem').forEach(el=>{ const m=el.getAttribute('data-v').toLowerCase().includes(q); el.style.display=m?'flex':'none'; if(q){ const c=el.querySelector('.ptofchk'); if(c) c.checked=m; } }); }
+function ptoColFilterToggleAll(ck){ document.querySelectorAll('#ptofList .ptofitem').forEach(el=>{ if(el.style.display!=='none'){ const c=el.querySelector('.ptofchk'); if(c) c.checked=ck; } }); }
+function ptoColFilterApply(col){
+  const all=[...document.querySelectorAll('#ptofList .ptofchk')];
+  const visible=all.filter(c=>{ const it=c.closest('.ptofitem'); return it && it.style.display!=='none'; });
+  const chk=visible.filter(c=>c.checked).map(c=>c.value);
+  if(visible.length===all.length && chk.length===all.length) delete PTO_COL_FILTRO[col];
+  else PTO_COL_FILTRO[col]=chk;
+  closePtoColFilter(); renderPto();
+}
+function ptoColFilterClear(col){ delete PTO_COL_FILTRO[col]; closePtoColFilter(); renderPto(); }
+window.openPtoColFilter=openPtoColFilter; window.ptoColFilterSearch=ptoColFilterSearch; window.ptoColFilterToggleAll=ptoColFilterToggleAll; window.ptoColFilterApply=ptoColFilterApply; window.ptoColFilterClear=ptoColFilterClear;
+function ptoSortToggle(col){
+  if(!PTO_SORT||PTO_SORT.col!==col) PTO_SORT={col,dir:1};
+  else if(PTO_SORT.dir===1) PTO_SORT={col,dir:-1};
+  else PTO_SORT=null;
+  renderPto();
+}
+window.ptoSortToggle=ptoSortToggle;
+function ptoTh(label,col,rows){
+  const active=ptoColFilterActive(col), sorting=PTO_SORT&&PTO_SORT.col===col;
+  const arrow=sorting?(PTO_SORT.dir===1?' ▲':' ▼'):'';
+  return '<span style="cursor:pointer;user-select:none" onclick="ptoSortToggle(\''+col+'\')" title="Ordenar">'+esc(label)+'<span style="font-size:9px;color:'+(sorting?'#1a7a3a;font-weight:900':'var(--muted)')+'">'+arrow+'</span></span> '
+    +'<span class="ptofbtn" style="cursor:pointer;user-select:none" title="Filtrar" data-col="'+col+'"><span style="font-size:9px;'+(active?'color:#1a7a3a;font-weight:900':'color:var(--muted)')+'">▼</span></span>';
+}
+// Recalcula el "left" de las columnas fijas (sticky) segun su ancho REAL renderizado -- necesario
+// porque ahora las columnas se pueden redimensionar a mano y/o ocultar (Pto Pesos), asi que un
+// left fijo en CSS quedaria desactualizado. Se llama despues de cada render y despues de cada resize.
+function actualizarStickyPto(){
+  const table=document.getElementById("pTabla"); if(!table) return;
+  const ths=[...table.querySelectorAll("thead th")];
+  let acc=0,css="";
+  for(let i=0;i<ths.length;i++){
+    if(!ths[i].classList.contains("fz")) break;
+    css+=`#pTabla th:nth-child(${i+1}),#pTabla td:nth-child(${i+1}){left:${acc}px;}`;
+    acc+=ths[i].getBoundingClientRect().width;
+  }
+  let styleEl=document.getElementById("pTablaStickyCSS");
+  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id="pTablaStickyCSS"; document.head.appendChild(styleEl); }
+  styleEl.textContent=css;
+}
+let pMostrarPtoPesos=true;
+const PTO_VIG_OPEN=new Set();
+function vigenciaRowHtml(c,ncols){
+  const h=(OVERRIDES[c.key]||{}).historial||[];
+  const filas=h.slice().reverse().map(e=>`<tr><td>${esc(mesLabel(e.desde))}</td><td style="text-align:right">${fmt(e.pto)}</td></tr>`).join("")||`<tr><td colspan="2" class="mut">Sin historial todavía</td></tr>`;
+  const opciones=mesesConFuturo(12).map(m=>`<option value="${m}">${esc(mesLabel(m))}</option>`).join("");
+  const form=editable?`<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">
+      <select class="vig-mes-sel" style="padding:4px 6px;font-size:11px;border:1px solid var(--line);border-radius:6px">${opciones}</select>
+      <input class="vig-pto-inp" type="text" inputmode="numeric" placeholder="Nuevo Pto ($, desde ese mes)" style="width:170px;padding:4px 6px;font-size:11px;text-align:right;border:1px solid var(--line);border-radius:6px">
+      <button class="btn vig-add-btn" data-c="${esc(c.key)}" style="padding:5px 12px;font-size:11px">Agregar vigencia</button>
+    </div>`:"";
+  return `<tr class="vig-detail"><td colspan="${ncols}" style="background:#F7F4EC;padding:10px 16px;border-bottom:1px solid var(--line)">
+    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Historial de Pto — ${esc(c.cuenta)}</div>
+    <table style="font-size:11px"><thead><tr><th style="text-align:left;padding-right:14px">Desde</th><th style="text-align:right">Pto</th></tr></thead><tbody>${filas}</tbody></table>
+    ${form}
+  </td></tr>`;
+}
   function renderPto(){
   const resp=document.getElementById("pResp").value;
   const allm=pMonths(), i0=+document.getElementById("pDesde").value, i1=+document.getElementById("pHasta").value;
   const a=Math.min(i0,i1), b=Math.max(i0,i1), meses=allm.slice(a,b+1), n=meses.length, ultimo=meses[n-1];
   const filtro=document.getElementById("pFiltro").value;
   const bloque=document.getElementById("pBloque").value;
-  const cur=+document.getElementById("pMoneda").value;const curLbl=["$","US$","US$","$"][cur],curTag=["pesos","USD of.","USD bill.","AXI"][cur];const CFGd={fechaBase:"jun-26",tcOf:1455,tcBill:1435};if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__=Object.assign({},CFGd);const CFG=OVERRIDES.__cfg__;const tcOf=+CFG.tcOf||1,tcBill=+CFG.tcBill||1;const repFac=[1,tcOf?1/tcOf:0,tcBill?1/tcBill:0,1],fCur=repFac[cur];window.curPtoFac=fCur;{const ce=document.getElementById("ptoCfg");if(ce)ce.innerHTML=`<b style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.65">Config Pto</b><label style="display:inline-flex;align-items:center;gap:5px">Fecha base<input type="text" value="${esc(CFG.fechaBase)}" onchange="window.cfgChange('fechaBase',this.value)" style="width:78px;padding:3px 6px" ${editable?"":"disabled"}></label><label style="display:inline-flex;align-items:center;gap:5px">TC 30/06 oficial<input type="number" step="0.01" value="${tcOf}" onchange="window.cfgChange('tcOf',this.value)" style="width:92px;padding:3px 6px" ${editable?"":"disabled"}></label><label style="display:inline-flex;align-items:center;gap:5px">blue<input type="number" step="0.01" value="${tcBill}" onchange="window.cfgChange('tcBill',this.value)" style="width:92px;padding:3px 6px" ${editable?"":"disabled"}></label>`;}
+  const cur=+document.getElementById("pMoneda").value;const curLbl=["$","US$","US$","$"][cur],curTag=["pesos","USD of.","USD bill.","AXI"][cur];
+  const CFGd={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__=Object.assign({},CFGd);const CFG=OVERRIDES.__cfg__;
+  const tcOf=+CFG.tcOf||1,tcBill=+CFG.tcBill||1;const repFac=[1,tcOf?1/tcOf:0,tcBill?1/tcBill:0,1],fCur=repFac[cur];window.curPtoFac=fCur;
+  const fechaBaseYM=CFG.fechaBase||FECHA_BASE_DEFAULT_YM;
+  {const ce=document.getElementById("ptoCfg");if(ce){
+    const opcionesBase=mesesConFuturo(12).map(m=>`<option value="${m}"${m===fechaBaseYM?" selected":""}>${esc(mesLabel(m))}</option>`).join("");
+    ce.innerHTML=`<b style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.65">Config Pto</b><label style="display:inline-flex;align-items:center;gap:5px">Fecha base (inicio de ejercicio)<select onchange="window.cfgChange('fechaBase',this.value)" style="padding:4px 6px" ${editable?"":"disabled"}>${opcionesBase}</select></label><label style="display:inline-flex;align-items:center;gap:5px">TC 30/06 oficial<input type="number" step="0.01" value="${tcOf}" onchange="window.cfgChange('tcOf',this.value)" style="width:92px;padding:3px 6px" ${editable?"":"disabled"}></label><label style="display:inline-flex;align-items:center;gap:5px">blue<input type="number" step="0.01" value="${tcBill}" onchange="window.cfgChange('tcBill',this.value)" style="width:92px;padding:3px 6px" ${editable?"":"disabled"}></label>`;
+  }}
   let rows=CONFIG_PTO.filter(c=>(!bloque||c.grupo===bloque)&&(!resp||c.responsable===resp));
-  if(filtro==="datos") rows=rows.filter(c=>((OVERRIDES[c.key]||{}).pto||0)>0 || Object.values(c.serie).some(v=>v[3]!==0));
-  rows=rows.slice().sort((x,y)=>OVERRIDES[y.key].pto-OVERRIDES[x.key].pto);
-  let tPtoMes=0,tRealUlt=0,tPtoPer=0,tRealPer=0,over=0; const colTot=meses.map(()=>0);
+  if(filtro==="datos") rows=rows.filter(c=>{const v=ptoVigente(c.key,ultimo);return (v&&v.pto)||Object.values(c.serie).some(s=>s[3]!==0);});
+  const rowsPreCol=rows; // antes de aplicar los filtros tipo Excel de columna -- el desplegable de
+                          // cada columna tiene que mostrar siempre todos los valores posibles, no
+                          // solo los que quedan despues de filtrar esa misma columna.
+  rows=rows.filter(ptoRowPass);
+  rows=rows.slice().sort((x,y)=>{
+    if(PTO_SORT){
+      const val=c=>PTO_SORT.col==="responsable"?iniciales(c.responsable):(PTO_SORT.col==="cuenta"?c.cuenta:(OVERRIDES[c.key]||{}).base);
+      return String(val(x)).localeCompare(String(val(y)),'es',{numeric:true})*PTO_SORT.dir;
+    }
+    const vx=ptoVigente(x.key,ultimo),vy=ptoVigente(y.key,ultimo);
+    return (vy?vy.pto:0)-(vx?vx.pto:0);
+  });
+  const mesesAcum=allm.filter(m=>m>=fechaBaseYM&&m<=ultimo);
+  let tRealUlt=0,tPtoUlt=0,tRealPer=0,tPtoPer=0,tAcumMensual=0,over=0; const colTot=meses.map(()=>0);
   const body=rows.map(c=>{
-    const ov=OVERRIDES[c.key],base=ov.base,pto=ov.pto, ptoMes=(base==="anual"?pto/12:pto)*fCur, ptoShow=pto*fCur;
+    const ov=OVERRIDES[c.key],base=ov.base;
+    const vigUlt=ptoVigente(c.key,ultimo);
+    const ptoShow=vigUlt?pesosEnMes(vigUlt.pto,vigUlt.desde,fechaBaseYM)*fCur:0;
+    const ptoMesFn=m=>{const v=ptoEnMes(c.key,m,fCur);return base==="anual"?v/12:v;};
+    const ptoMesUlt=ptoMesFn(ultimo);
     const reals=meses.map(m=>{const s=c.serie[m];return s?s[cur]:0;}); reals.forEach((v,k)=>colTot[k]+=v);
-    const realUlt=(c.serie[ultimo]?c.serie[ultimo][cur]:0), desvUlt=realUlt-ptoMes;
-    const realPer=reals.reduce((s,v)=>s+v,0), ptoPer=ptoMes*n, desvPer=realPer-ptoPer, pct=ptoPer?realPer/ptoPer:0;
-    tPtoMes+=ptoMes;tRealUlt+=realUlt;tPtoPer+=ptoPer;tRealPer+=realPer;if(realPer>ptoPer)over++;
-    const cells=reals.map(v=>`<td${v>ptoMes?' class="over"':""}>${v?fmt(v):"–"}</td>`).join("");
-    return `<tr>
-      <td class="fz fz1 ell" title="${esc(c.cuenta)}">${c.cuenta}</td>
-      <td class="fz fz2 ell" title="${esc(c.responsable||"")}">${abreviar(c.responsable)}</td>
-      <td class="fz fz3"><select class="base-sel" data-c="${esc(c.key)}"${editable?"":" disabled"}><option value="mensual"${base==="mensual"?" selected":""}>mensual</option><option value="anual"${base==="anual"?" selected":""}>anual</option></select></td>
-      <td class="fz fz4"><input class="pto-inp" type="text" inputmode="numeric" data-c="${esc(c.key)}" value="${fmt(ptoShow)}"${editable?"":" disabled"}></td>
-      <td class="fz fz5 grp">${fmt(ptoMes)}</td>${cells}
-      <td class="${desvUlt>0?"over":"under"}">${fmt(desvUlt)}</td>
-      <td>${fmt(realPer)} <span class="mut">/ ${fmt(ptoPer)}</span></td>
-      <td class="${desvPer>0?"over":"under"}">${fmt(desvPer)}</td>
-      <td class="${realPer>ptoPer?"over":"under"}">${(pct*100).toFixed(0)}%</td></tr>`;
+    const realUlt=(c.serie[ultimo]?c.serie[ultimo][cur]:0), desvUlt=realUlt-ptoMesUlt;
+    const realPer=reals.reduce((s,v)=>s+v,0);
+    const ptoPer=meses.reduce((s,m)=>s+ptoMesFn(m),0);
+    tPtoUlt+=ptoMesUlt;tRealUlt+=realUlt;tPtoPer+=ptoPer;tRealPer+=realPer;if(realPer>ptoPer)over++;
+    const cells=meses.map((m,k)=>{const v=reals[k],ptoM=ptoMesFn(m);return `<td class="real${v>ptoM?' over':''}">${v?fmt(v):"–"}</td>`;}).join("");
+    let acumCell;
+    if(base==="anual"){
+      const realAcum=mesesAcum.reduce((s,m)=>s+(c.serie[m]?c.serie[m][cur]:0),0);
+      const ptoAnualCur=vigUlt?vigUlt.pto*fCur:0;
+      const pctA=ptoAnualCur?realAcum/ptoAnualCur:null;
+      acumCell=pctA==null?`<td class="info mut">–</td>`:`<td class="info ${realAcum>ptoAnualCur?"over":"under"}">${(pctA*100).toFixed(0)}%</td>`;
+    }else{
+      const acumMes=mesesAcum.reduce((s,m)=>s+((c.serie[m]?c.serie[m][cur]:0)-ptoMesFn(m)),0);
+      tAcumMensual+=acumMes;
+      acumCell=`<td class="info ${acumMes>0?"over":"under"}">${fmt(acumMes)}</td>`;
+    }
+    const vigBtn=`<span class="vig-btn" data-c="${esc(c.key)}" title="Ver/editar historial de Pto" style="cursor:pointer;margin-left:5px;opacity:.55">🕘</span>`;
+    const filaPrincipal=`<tr>
+      <td class="fz fz1 ell real" title="${esc(c.cuenta)}">${c.cuenta}</td>
+      <td class="fz fz2 ell real" title="${esc(c.responsable||"")}">${iniciales(c.responsable)}</td>
+      <td class="fz fz3 info"><select class="base-sel" data-c="${esc(c.key)}"${editable?"":" disabled"}><option value="mensual"${base==="mensual"?" selected":""}>M</option><option value="anual"${base==="anual"?" selected":""}>A</option></select></td>
+      ${pMostrarPtoPesos?`<td class="fz fz4 info"><input class="pto-inp" type="text" inputmode="numeric" data-c="${esc(c.key)}" value="${fmt(ptoShow)}"${editable?"":" disabled"}>${vigBtn}</td>`:""}
+      <td class="fz fz5 grp info">${fmt(ptoMesUlt)}${pMostrarPtoPesos?"":vigBtn}</td>${cells}
+      <td class="real"><b>${fmt(realPer)}</b></td>
+      <td class="info ${desvUlt>0?"over":"under"}">${fmt(desvUlt)}</td>
+      ${acumCell}</tr>`;
+    return PTO_VIG_OPEN.has(c.key)?filaPrincipal+vigenciaRowHtml(c,99):filaPrincipal;
   }).join("");
-  const tDesvUlt=tRealUlt-tPtoMes, tDesvPer=tRealPer-tPtoPer, tPct=tPtoPer?tRealPer/tPtoPer:0;
+  const tDesvUlt=tRealUlt-tPtoUlt;
   const totCells=colTot.map(v=>`<td><b>${v?fmt(v):"–"}</b></td>`).join("");
-  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td><td class="fz fz2"></td><td class="fz fz3"></td><td class="fz fz4"></td><td class="fz fz5 grp">${fmt(tPtoMes)}</td>${totCells}<td class="${tDesvUlt>0?"over":"under"}">${fmt(tDesvUlt)}</td><td>${fmt(tRealPer)} <span class="mut">/ ${fmt(tPtoPer)}</span></td><td class="${tDesvPer>0?"over":"under"}">${fmt(tDesvPer)}</td><td class="${tRealPer>tPtoPer?"over":"under"}">${(tPct*100).toFixed(0)}%</td></tr>`;
-  const monthHdr=meses.map(m=>`<th>${mesLabel(m)}</th>`).join("");
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td><td class="fz fz2"></td><td class="fz fz3 info"></td>${pMostrarPtoPesos?`<td class="fz fz4 info"></td>`:""}<td class="fz fz5 grp info">${fmt(tPtoUlt)}</td>${totCells}<td class="real"><b>${fmt(tRealPer)}</b></td><td class="info ${tDesvUlt>0?"over":"under"}">${fmt(tDesvUlt)}</td><td class="info ${tAcumMensual>0?"over":"under"}" title="Suma solo de cuentas mensuales; las anuales se ven en % por fila">${fmt(tAcumMensual)}</td></tr>`;
+  const monthHdr=meses.map(m=>`<th class="real">${mesLabel(m)}</th>`).join("");
+  document.getElementById("pTabla").className="grid";
   document.getElementById("pTabla").innerHTML=
-    `<thead><tr><th class="fz fz1">Cuenta</th><th class="fz fz2">Responsable</th><th class="fz fz3">Base</th><th class="fz fz4">Pto ${curTag}<br><small style="font-weight:400;opacity:.6">base ${CFG.fechaBase}</small></th><th class="fz fz5 grp">Pto/mes</th>${monthHdr}<th>Desvío últ. mes</th><th>Real / Pto período (${curTag})</th><th>Desvío período</th><th>% ejec.</th></tr></thead><tbody>${body}${totalRow}</tbody>`;
-  const dc=tRealPer>tPtoPer?"var(--cost)":"var(--income)";
+    `<thead><tr>
+      <th class="fz fz1 real">${ptoTh("Cuenta","cuenta",rowsPreCol)}</th>
+      <th class="fz fz2 real">${ptoTh("Resp.","responsable",rowsPreCol)}</th>
+      <th class="fz fz3 info">${ptoTh("Base","base",rowsPreCol)}</th>
+      ${pMostrarPtoPesos?`<th class="fz fz4 info">Pto ${curTag}<br><small style="font-weight:400;opacity:.6">base ${esc(mesLabel(fechaBaseYM))}</small></th>`:""}
+      <th class="fz fz5 grp info">Pto/mes<br><small style="font-weight:400;opacity:.6">${esc(mesLabel(ultimo||fechaBaseYM))}</small></th>${monthHdr}
+      <th class="real">Total real</th><th class="info">Desvío últ. mes</th><th class="info">Acum. desde ${esc(mesLabel(fechaBaseYM))}</th>
+    </tr></thead><tbody>${body}${totalRow}</tbody>`;
+  document.querySelectorAll('.ptofbtn').forEach(el=>el.addEventListener('click',ev=>openPtoColFilter(el.dataset.col,ev,rowsPreCol)));
+  colResizeInit(document.getElementById("pTabla"));
+  requestAnimationFrame(actualizarStickyPto);
+  const respLegend=[...new Set(rows.map(c=>c.responsable).filter(Boolean))].sort().map(n=>`<b>${iniciales(n)}</b>=${esc(n.replace(/\s*,\s*/,", "))}`).join(" · ");
   document.getElementById("pKpis").innerHTML=
-    `<div class="kpi"><div class="k-lbl">Pto del período</div><div class="k-val">${curLbl} ${fmtM(tPtoPer)}</div></div>
-     <div class="kpi"><div class="k-lbl">Real del período</div><div class="k-val">${curLbl} ${fmtM(tRealPer)}</div></div>
-     <div class="kpi"><div class="k-lbl">Desvío período</div><div class="k-val" style="color:${dc}">${curLbl} ${fmtM(tDesvPer)}</div></div>
-     <div class="kpi"><div class="k-lbl">Líneas excedidas</div><div class="k-val">${over}</div></div>`;
-  document.getElementById("pFoot").innerHTML="<b>Real por mes</b>: gasto real de cada mes del período. <b>Desvío últ. mes</b>: real del último mes vs pto mensual. <b>Acumulado período</b>: real vs pto del período (pto mes × meses). Pto editable; base anual prorratea ÷12.";
+    `<div class="kpi"><div class="k-lbl">Real del período</div><div class="k-val">${curLbl} ${fmtM(tRealPer)}</div></div>
+     <div class="kpi"><div class="k-lbl">Desvío período</div><div class="k-val" style="color:${tRealPer>tPtoPer?"var(--cost)":"var(--income)"}">${curLbl} ${fmtM(tRealPer-tPtoPer)}</div></div>
+     <div class="kpi"><div class="k-lbl">Líneas excedidas</div><div class="k-val">${over}</div></div>
+     <div class="kpi"><div class="k-lbl">Acum. mensuales desde ${esc(mesLabel(fechaBaseYM))}</div><div class="k-val" style="color:${tAcumMensual>0?"var(--cost)":"var(--income)"}">${curLbl} ${fmtM(tAcumMensual)}</div></div>`;
+  document.getElementById("pFoot").innerHTML=`<div style="margin-bottom:6px">${respLegend}</div><b>Total real</b>: suma de real del período seleccionado (Desde/Hasta). <b>Desvío últ. mes</b>: real del último mes vs Pto de ese mes. <b>Acum. desde ${esc(mesLabel(fechaBaseYM))}</b>: para cuentas mensuales, desvío acumulado mes a mes (Pto ajustado por inflación de cada mes, no acumulativo respecto de "hoy") desde el inicio de ejercicio hasta el mes "Hasta" elegido arriba (no depende del filtro "Desde"); para anuales, real acumulado del ejercicio sobre Pto anual vigente. 🕘 = historial de vigencias del Pto (clic para ver/agregar un cambio "desde tal mes").`;
 }
+/* ===== Columnas redimensionables (tabla .grid) — mismo patrón que 4housing-compras, pero solo con
+   localStorage (esta app no tiene todavía una tabla de preferencias por usuario en Supabase). Tirá
+   del borde derecho de un encabezado para ensanchar/achicar esa columna; queda guardado por
+   navegador, no hace falta rehacerlo cada vez que se entra a Presupuesto. */
+let COLRESIZE_DRAG=null;
+function colResizeSig(table){
+  const ths=[...table.querySelectorAll('thead th')].map(th=>(th.textContent||'').trim()).join('|');
+  let h=0; for(let i=0;i<ths.length;i++) h=(h*31+ths.charCodeAt(i))|0;
+  return 'eerr_colw:'+ths.length+':'+h;
+}
+function colResizeApplySaved(table){
+  let saved=null; try{ saved=JSON.parse(localStorage.getItem(colResizeSig(table))||'null'); }catch(e){}
+  if(!saved) return;
+  const ths=[...table.querySelectorAll('thead th')];
+  table.style.tableLayout='fixed';
+  ths.forEach((th,i)=>{ if(saved[i]) th.style.width=saved[i]+'px'; });
+}
+function colResizeSave(table, ths){
+  const widths={}; ths.forEach((th,i)=>{ const w=parseInt(th.style.width,10); if(w) widths[i]=w; });
+  try{ localStorage.setItem(colResizeSig(table), JSON.stringify(widths)); }catch(e){}
+}
+// A diferencia de Compras (tablas que se arman una vez), #pTabla reconstruye TODO su innerHTML en
+// cada render (cambia un filtro, se edita un Pto, etc.), asi que los <th> son siempre nuevos --
+// por eso esta version no usa el flag "ya inicializado" de Compras: se re-engancha en cada render.
+function colResizeInit(table){
+  const ths=[...table.querySelectorAll('thead th')];
+  if(ths.length<2) return;
+  colResizeApplySaved(table);
+  ths.forEach(th=>{
+    const r=document.createElement('span');
+    r.className='col-resizer';
+    r.onmousedown=(e)=>{
+      e.preventDefault(); e.stopPropagation();
+      if(table.style.tableLayout!=='fixed'){
+        ths.forEach(t=>{ t.style.width=t.getBoundingClientRect().width+'px'; });
+        table.style.tableLayout='fixed';
+      }
+      r.classList.add('active');
+      COLRESIZE_DRAG={ th, r, table, ths, startX:e.clientX, startW:th.getBoundingClientRect().width };
+      document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
+    };
+    th.appendChild(r);
+  });
+}
+document.addEventListener('mousemove', e=>{
+  if(!COLRESIZE_DRAG) return;
+  const w=Math.max(32, COLRESIZE_DRAG.startW+(e.clientX-COLRESIZE_DRAG.startX));
+  COLRESIZE_DRAG.th.style.width=w+'px';
+  if(COLRESIZE_DRAG.table.id==="pTabla") actualizarStickyPto();
+});
+document.addEventListener('mouseup', ()=>{
+  if(!COLRESIZE_DRAG) return;
+  const {table, ths, r}=COLRESIZE_DRAG;
+  colResizeSave(table, ths);
+  r.classList.remove('active');
+  COLRESIZE_DRAG=null; document.body.style.cursor=''; document.body.style.userSelect='';
+});
 function tableToCSV(){
   const t=document.getElementById("pTabla"),lines=[];
   t.querySelectorAll("tr").forEach(tr=>{
