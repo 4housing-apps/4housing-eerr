@@ -132,8 +132,7 @@ table.grid{position:relative;}
 table.grid th{position:relative;}
 table.grid th .col-resizer{position:absolute;top:0;right:0;width:8px;height:100%;cursor:col-resize;z-index:8;}
 table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rgba(95,122,78,.25);}
-.vig-detail td{border-bottom:1px solid var(--line);}
-.vig-btn:hover{opacity:1!important;}
+.vig-link:hover{opacity:1!important;}
 .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .bar{display:flex;gap:8px;justify-content:flex-end;margin:4px 0 10px;}
 .btn{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;}
@@ -194,6 +193,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
     <nav>
       <button class="tab active" data-v="eerr">Estado de Resultados</button>
       <button class="tab" data-v="pto">Presupuesto · Estructura</button>
+      <button class="tab" data-v="ptohist">Historial Pto</button>
       <button class="tab" data-v="cmv">Proyectos · CMV</button>
       <button class="tab" data-v="proy">Control Proyectos</button>
       <button class="tab" data-v="dic">Diccionario</button>
@@ -256,6 +256,17 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
   <div class="bar"><div class="lock"><span id="lockState">Edición bloqueada</span><input id="lockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="btnLock">Desbloquear (Gerencia)</button></div><button class="btn" id="btnCsv">Descargar Excel</button><button class="btn" id="btnPdf">Imprimir / PDF</button></div>
   <div class="table-wrap pto-wrap"><table id="pTabla"></table></div>
   <div class="foot" id="pFoot"></div>
+</div>
+<div id="view-ptohist" style="display:none">
+  <div class="controls">
+    <div class="ctl"><label for="phCuenta">Cuenta</label><select id="phCuenta"></select></div>
+    <div class="ctl"><label for="phMes">Desde</label><select id="phMes"></select></div>
+    <div class="ctl"><label for="phPto">Nuevo Pto ($, en pesos de ese mes)</label><input id="phPto" type="text" inputmode="numeric" placeholder="0" style="width:150px"></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" id="phAddBtn">Agregar vigencia</button></div>
+    <span class="note" id="phLockNote"></span>
+  </div>
+  <div class="table-wrap"><table id="phTabla"></table></div>
+  <div class="foot" id="phFoot">Cada cambio de Presupuesto queda acá, con la fecha desde la que aplica — nada se sobreescribe. El bloqueo de edición es el mismo que en Presupuesto·Estructura.</div>
 </div>
 <div id="view-cmv" style="display:none">
     <div class="controls">
@@ -471,7 +482,7 @@ function renderCharts(pg,meses,bloques){
 }
 
 /* ===== tabs ===== */
-function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.getElementById("view-dic").style.display=v==="dic"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));if(v==="dic")initDic();}
+function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-ptohist").style.display=v==="ptohist"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.getElementById("view-dic").style.display=v==="dic"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));if(v==="dic")initDic();if(v==="ptohist")renderPtoHist();}
 
 /* ===== Presupuesto ===== */
 let editable=false;
@@ -599,20 +610,11 @@ async function initPto(){
     }
     saveOverrides();renderPto();});
   document.getElementById("pTabla").addEventListener("click",e=>{
-    const vigBtn=e.target.closest(".vig-btn");
-    if(vigBtn){
-      const c=vigBtn.dataset.c;
-      if(PTO_VIG_OPEN.has(c))PTO_VIG_OPEN.delete(c);else PTO_VIG_OPEN.add(c);
-      renderPto();return;
-    }
-    const addBtn=e.target.closest(".vig-add-btn");
-    if(addBtn){
-      if(!editable)return;
-      const c=addBtn.dataset.c, row=addBtn.closest(".vig-detail");
-      const mesSel=row.querySelector(".vig-mes-sel"), ptoInp=row.querySelector(".vig-pto-inp");
-      const desde=mesSel.value, pto=parseFloat(String(ptoInp.value).replace(/\./g,"").replace(/,/g,"."))||0;
-      agregarVigencia(c,desde,pto);
-      renderPto();
+    const vigLink=e.target.closest(".vig-link");
+    if(vigLink){
+      showView("ptohist");
+      const sel=document.getElementById("phCuenta");
+      if(sel){ sel.value=vigLink.dataset.c; renderPtoHist(); }
     }
   });
   const togglePto=document.getElementById("pTogglePtoPesos");
@@ -622,6 +624,58 @@ async function initPto(){
   document.getElementById("btnLock").addEventListener("click",onLockClick);
   document.getElementById("lockKey").addEventListener("keydown",e=>{if(e.key==="Enter")onLockClick();});
   setLock(false);
+}
+/* ===== Historial Pto: registro de todos los cambios de vigencia, en su propia pestaña (a pedido
+   de Micaela -- mostrarlo expandido adentro de la fila de Presupuesto rompía la tabla, con
+   columnas fijas/redimensionables no combina bien con filas de ancho variable). Usa el mismo
+   candado (editable) que Presupuesto·Estructura -- no tiene uno propio. */
+function eliminarVigencia(key,desde){
+  const h=(OVERRIDES[key]||{}).historial; if(!h) return;
+  const i=h.findIndex(e=>e.desde===desde); if(i<0) return;
+  if(!confirm("¿Eliminar la vigencia desde "+mesLabel(desde)+" de \""+((CONFIG_PTO.find(c=>c.key===key)||{}).cuenta||key)+"\"? Esto no se puede deshacer.")) return;
+  h.splice(i,1);
+  saveOverrides();renderPtoHist();renderPto();
+}
+window.eliminarVigencia=eliminarVigencia;
+function initPtoHist(){
+  const sel=document.getElementById("phCuenta");
+  sel.innerHTML="";sel.add(new Option("Todas las cuentas",""));
+  CONFIG_PTO.slice().sort((a,b)=>a.cuenta<b.cuenta?-1:1).forEach(c=>sel.add(new Option(c.cuenta,c.key)));
+  const mesSel=document.getElementById("phMes");
+  mesSel.innerHTML="";mesesConFuturo(12).forEach(m=>mesSel.add(new Option(mesLabel(m),m)));
+  sel.addEventListener("change",renderPtoHist);
+  document.getElementById("phAddBtn").addEventListener("click",()=>{
+    if(!editable){alert('Desbloqueá la edición en Presupuesto·Estructura primero (botón "Desbloquear (Gerencia)").');return;}
+    const key=sel.value; if(!key){alert("Elegí una cuenta.");return;}
+    const desde=mesSel.value;
+    const ptoInp=document.getElementById("phPto");
+    const pto=parseFloat(String(ptoInp.value).replace(/\./g,"").replace(/,/g,"."))||0;
+    agregarVigencia(key,desde,pto);
+    ptoInp.value="";
+    renderPtoHist();
+  });
+}
+function renderPtoHist(){
+  const sel=document.getElementById("phCuenta"); if(!sel) return;
+  const filtroKey=sel.value;
+  document.getElementById("phLockNote").textContent=editable?"Edición habilitada (Gerencia)":"Edición bloqueada (ver Presupuesto·Estructura para desbloquear)";
+  const cuentasPorKey={}; CONFIG_PTO.forEach(c=>cuentasPorKey[c.key]=c);
+  let filas=[];
+  Object.keys(OVERRIDES).forEach(key=>{
+    if(key==="__cfg__") return;
+    if(filtroKey&&key!==filtroKey) return;
+    const h=OVERRIDES[key].historial||[]; const c=cuentasPorKey[key];
+    h.forEach(e=>filas.push({key,cuenta:c?c.cuenta:key,responsable:c?c.responsable:"",desde:e.desde,pto:e.pto}));
+  });
+  filas.sort((a,b)=>b.desde<a.desde?-1:(b.desde>a.desde?1:(a.cuenta<b.cuenta?-1:1)));
+  const rowsHtml=filas.map(f=>`<tr>
+      <td class="ell" style="max-width:220px" title="${esc(f.cuenta)}">${esc(f.cuenta)}</td>
+      <td class="mut">${esc(iniciales(f.responsable))}</td>
+      <td>${esc(mesLabel(f.desde))}</td>
+      <td style="text-align:right">${fmt(f.pto)}</td>
+      <td>${editable?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="eliminarVigencia('${esc(f.key).replace(/'/g,"\\'")}','${f.desde}')">Eliminar</button>`:""}</td>
+    </tr>`).join("")||`<tr><td colspan="5" class="mut" style="padding:16px">Sin cambios de Pto registrados todavía${filtroKey?" para esta cuenta":""}.</td></tr>`;
+  document.getElementById("phTabla").innerHTML=`<thead><tr><th>Cuenta</th><th>Resp.</th><th>Desde</th><th>Pto</th><th></th></tr></thead><tbody>${rowsHtml}</tbody>`;
 }
 window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
 // Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
@@ -709,22 +763,6 @@ function actualizarStickyPto(){
   styleEl.textContent=css;
 }
 let pMostrarPtoPesos=true;
-const PTO_VIG_OPEN=new Set();
-function vigenciaRowHtml(c,ncols){
-  const h=(OVERRIDES[c.key]||{}).historial||[];
-  const filas=h.slice().reverse().map(e=>`<tr><td>${esc(mesLabel(e.desde))}</td><td style="text-align:right">${fmt(e.pto)}</td></tr>`).join("")||`<tr><td colspan="2" class="mut">Sin historial todavía</td></tr>`;
-  const opciones=mesesConFuturo(12).map(m=>`<option value="${m}">${esc(mesLabel(m))}</option>`).join("");
-  const form=editable?`<div style="display:flex;gap:6px;align-items:center;margin-top:8px;flex-wrap:wrap">
-      <select class="vig-mes-sel" style="padding:4px 6px;font-size:11px;border:1px solid var(--line);border-radius:6px">${opciones}</select>
-      <input class="vig-pto-inp" type="text" inputmode="numeric" placeholder="Nuevo Pto ($, desde ese mes)" style="width:170px;padding:4px 6px;font-size:11px;text-align:right;border:1px solid var(--line);border-radius:6px">
-      <button class="btn vig-add-btn" data-c="${esc(c.key)}" style="padding:5px 12px;font-size:11px">Agregar vigencia</button>
-    </div>`:"";
-  return `<tr class="vig-detail"><td colspan="${ncols}" style="background:#F7F4EC;padding:10px 16px;border-bottom:1px solid var(--line)">
-    <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Historial de Pto — ${esc(c.cuenta)}</div>
-    <table style="font-size:11px"><thead><tr><th style="text-align:left;padding-right:14px">Desde</th><th style="text-align:right">Pto</th></tr></thead><tbody>${filas}</tbody></table>
-    ${form}
-  </td></tr>`;
-}
   function renderPto(){
   const resp=document.getElementById("pResp").value;
   const allm=pMonths(), i0=+document.getElementById("pDesde").value, i1=+document.getElementById("pHasta").value;
@@ -778,17 +816,17 @@ function vigenciaRowHtml(c,ncols){
       tAcumMensual+=acumMes;
       acumCell=`<td class="info ${acumMes>0?"over":"under"}">${fmt(acumMes)}</td>`;
     }
-    const vigBtn=`<span class="vig-btn" data-c="${esc(c.key)}" title="Ver/editar historial de Pto" style="cursor:pointer;margin-left:5px;opacity:.55">🕘</span>`;
+    const vigLink=`<span class="vig-link" data-c="${esc(c.key)}" title="Ver/editar historial de Pto (pestaña Historial Pto)" style="cursor:pointer;margin-left:5px;opacity:.55">🕘</span>`;
     const filaPrincipal=`<tr>
       <td class="fz fz1 ell real" title="${esc(c.cuenta)}">${c.cuenta}</td>
       <td class="fz fz2 ell real" title="${esc(c.responsable||"")}">${iniciales(c.responsable)}</td>
       <td class="fz fz3 info"><select class="base-sel" data-c="${esc(c.key)}"${editable?"":" disabled"}><option value="mensual"${base==="mensual"?" selected":""}>M</option><option value="anual"${base==="anual"?" selected":""}>A</option></select></td>
-      ${pMostrarPtoPesos?`<td class="fz fz4 info"><input class="pto-inp" type="text" inputmode="numeric" data-c="${esc(c.key)}" value="${fmt(ptoShow)}"${editable?"":" disabled"}>${vigBtn}</td>`:""}
-      <td class="fz fz5 grp info">${fmt(ptoMesUlt)}${pMostrarPtoPesos?"":vigBtn}</td>${cells}
+      ${pMostrarPtoPesos?`<td class="fz fz4 info"><input class="pto-inp" type="text" inputmode="numeric" data-c="${esc(c.key)}" value="${fmt(ptoShow)}"${editable?"":" disabled"}>${vigLink}</td>`:""}
+      <td class="fz fz5 grp info">${fmt(ptoMesUlt)}${pMostrarPtoPesos?"":vigLink}</td>${cells}
       <td class="real"><b>${fmt(realPer)}</b></td>
       <td class="info ${desvUlt>0?"over":"under"}">${fmt(desvUlt)}</td>
       ${acumCell}</tr>`;
-    return PTO_VIG_OPEN.has(c.key)?filaPrincipal+vigenciaRowHtml(c,99):filaPrincipal;
+    return filaPrincipal;
   }).join("");
   const tDesvUlt=tRealUlt-tPtoUlt;
   const totCells=colTot.map(v=>`<td><b>${v?fmt(v):"–"}</b></td>`).join("");
@@ -2220,6 +2258,7 @@ async function onCargarInformeCrudo(file){
   await cargarTodoDesdeSupabase();
   initEerrUI();
   initPto();
+  initPtoHist();
   initCMV();
   try{initProy();}catch(e){console.warn("proy:",e);}
 })();
