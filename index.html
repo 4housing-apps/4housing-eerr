@@ -308,6 +308,7 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
     <div class="panel"><h3>Índice FACPCE (IPC Nac. empalme IPIM) — mensual</h3><div class="table-wrap eerr-wrap"><table id="dicTablaIdx"></table></div></div>
   </div>
   <div class="foot" id="dicFoot"></div>
+  <div class="updbar"><button class="btn updbtn" id="tcOvBtn" style="background:#8a5a3d">⟳ Cargar tabla TC por comprobante</button><input type="file" id="tcOvFile" accept=".xlsx" style="display:none"><span id="tcOvMsg" class="updmsg">Corrección manual del dólar blue para movimientos "ContaParam" puntuales, por Nro. de comprobante — no es parte del diccionario compartido con Compras. Subí un Excel con una hoja "TC" (o la primera hoja) con columnas "Nro. comprobante" y "TC Bill". Reemplaza por completo la tabla anterior.</span></div>
 </div>
   </div>
 </div></div>
@@ -815,6 +816,54 @@ function onHistLockAplicar(){
   inp.value=""; inp.placeholder="Clave";
   renderHistLockUI();
 }
+/* Correccion manual del USD Billete para movimientos "ContaParam" puntuales, por Nro. de
+   comprobante (a pedido de Micaela: para algunos de esos movimientos el TC blue "de siempre"
+   -- la cotizacion propia del asiento, columna NA2/cotiz -- no era el correcto). Tabla propia de
+   este EERR, no compartida con Compras (ContaParam es una fuente exclusiva de esta app). Semilla
+   inicial: hoja "TC" de Historico_202208_a_202503_V02.xlsx (969 comprobantes), provista por
+   Micaela el 2026-09-18. cargarTodoDesdeSupabase() la reemplaza si ya hay una guardada (p.ej. por
+   haber subido una tabla mas nueva con "Cargar tabla TC por comprobante"). */
+const TC_COMPROBANTE_OVERRIDE_SEED={"845":282,"848":282,"825":293,"809":292,"815":292,"839":292,"831":292,"827":292,"813":292,"840":295,"838":291,"841":291,"843":291,"842":291,"844":293,"849":295,"862":290,"896":290,"863":290,"832":290,"852":290,"833":290,"853":290,"854":290,"855":290,"856":290,"857":290,"851":290,"859":290,"858":290,"866":290,"860":290,"812":290,"867":290,"878":277,"880":287,"892":287,"904":288,"868":288,"898":288,"897":288,"871":288,"870":288,"902":288,"903":288,"906":288,"907":288,"908":288,"900":288,"901":288,"899":288,"905":288,"873":288,"876":288,"879":288,"895":288,"894":288,"893":288,"909":277,"881":277,"882":277,"872":290,"869":290,"874":290,"910":290,"922":292,"918":292,"939":290,"948":290,"920":290,"921":290,"923":290,"946":290,"934":290,"935":290,"936":290,"937":290,"941":290,"942":290,"940":290,"919":290,"924":290,"928":290,"931":290,"930":290,"929":290,"933":290,"985":290,"932":290,"945":292,"947":292,"938":292,"943":292,"944":292,"984":314,"967":314,"966":314,"957":314,"952":314,"954":314,"950":314,"986":314,"962":314,"982":314,"977":314,"973":314,"975":314,"974":313,"978":316,"979":320,"958":320,"953":320,"993":320,"955":320,"956":320,"951":320,"964":320,"965":320,"959":320,"963":320,"983":320,"960":325,"992":325,"996":325,"994":330,"991":330,"995":330,"1009":340,"1039":346,"1017":346,"1016":346,"1018":346,"1003":346,"1005":346,"1008":346,"1036":346,"1011":346,"961":346,"1023":346,"1020":346,"1022":346,"1025":346,"1021":346,"1010":357,"1019":369,"1002":369,"1004":369,"1006":369,"1007":369,"1013":369,"1024":369,"1026":369,"1047":383,"1048":383,"1050":383,"1053":383,"1058":383,"1040":381,"1043":381,"1042":381,"1037":381,"1038":381,"1064":381,"1063":381,"1054":377,"1068":377,"1061":378,"1049":378,"1051":378,"1052":378,"1056":378,"1075":378,"1059":378,"1060":378,"1055":378,"1065":378,"1066":378,"1067":378,"1073":378,"1085":378,"1069":377,"1062":377,"1078":375,"1077":375,"1079":375,"1089":375,"1090":375,"1092":375,"1093":375,"1095":375,"1094":375,"1084":375,"1080":375,"1081":375,"1074":375,"1091":373,"1106":373,"1117":373,"1082":373,"1083":373,"1096":373,"1111":377,"1100":377,"1098":383,"1099":389,"1121":389,"1110":389,"1105":389,"1104":389,"1103":389,"1112":395,"1127":395,"1128":395,"1131":395,"1118":395,"1107":395,"1109":395,"1120":395,"1136":395,"1141":395,"1012":395,"1119":395,"1108":395,"1122":395,"1138":395,"1137":392,"1132":392,"1129":392,"1139":392,"1130":391,"1161":398,"1140":400,"1152":400,"1162":442,"1167":469,"1144":469,"1174":469,"1166":469,"1149":469,"1145":469,"1146":469,"1148":469,"1147":469,"1151":469,"1153":469,"1154":469,"1150":469,"1164":469,"1143":469,"1163":469,"1329":469,"1176":486,"1183":490,"1175":490,"1186":490,"1181":490,"1179":490,"1177":490,"1189":490,"1190":490,"1184":490,"1187":490,"1188":490,"1195":490,"1196":490,"1192":490,"1193":490,"1194":490,"1218":490,"1330":490,"1220":490,"1180":487,"1182":487,"1178":487,"1191":487,"1204":492,"1206":495,"1219":494,"1202":494,"1201":494,"1213":494,"1203":494,"1205":494,"1200":494,"1230":494,"1207":494,"1231":494,"1208":494,"1221":494,"1212":494,"1215":494,"1216":494,"1209":494,"1211":494,"1210":494,"1331":495,"1250":550,"1255":550,"1243":550,"1242":550,"1247":550,"1251":550,"1234":550,"1235":550,"1236":550,"1237":550,"1238":550,"1252":550,"1239":550,"1240":550,"1253":550,"1232":550,"1254":550,"1241":550,"1256":550,"1233":550,"1244":550,"1245":550,"1246":550,"1249":550,"1332":596,"1261":735,"1270":735,"1269":735,"1264":735,"1265":735,"1266":735,"1267":735,"1273":735,"1274":735,"1262":735,"1275":735,"1314":735,"1272":735,"1271":735,"1263":735,"1276":735,"1268":735,"1277":735,"1278":735,"1333":730,"1369":738,"1340":800,"1339":800,"1315":800,"1316":800,"1323":800,"1317":800,"1318":800,"1319":800,"1320":800,"1322":800,"1324":800,"1325":800,"1326":800,"1338":800,"1321":800,"1337":800,"1327":800,"1328":800,"1334":800,"1471":920,"1472":920,"1383":920,"1382":920,"1370":920,"1388":920,"1371":920,"1386":920,"1384":920,"1372":920,"1387":920,"1385":920,"1374":920,"1389":920,"1375":920,"1376":920,"1390":920,"1395":920,"1373":920,"1393":920,"1391":920,"1392":920,"1394":925,"1381":925,"1466":925,"1468":925,"1469":925,"1467":925,"1470":925,"1499":960,"1507":895,"1520":895,"1521":895,"1494":895,"1493":895,"1506":895,"1516":895,"1509":895,"1510":895,"1504":895,"1511":895,"1512":895,"1513":895,"1505":895,"1514":895,"1517":895,"1518":895,"1502":895,"1503":895,"1501":895,"1515":895,"1497":895,"1491":895,"1519":895,"1500":895,"1496":955,"1492":910,"1508":990,"1559":990,"1560":990,"1529":970,"1533":970,"2335":990,"1526":995,"1557":1025,"1554":1025,"1555":1025,"1528":1025,"1527":1025,"1547":1025,"1548":1025,"1552":1025,"1545":1025,"1551":1025,"1550":1025,"1549":1025,"1538":1025,"1536":1025,"1546":1025,"1534":1025,"1530":1025,"1575":1025,"1539":1025,"1540":1025,"1553":1025,"1535":1025,"1850":1000,"1578":1150,"1579":1130,"2336":1180,"1582":1225,"1679":1225,"1576":1240,"1584":1220,"1583":1220,"1585":1220,"1586":1220,"1604":1235,"1626":1215,"1629":1215,"1577":1195,"1609":1195,"1610":1195,"1632":1195,"1607":1195,"1628":1175,"1615":1175,"1623":1145,"1630":1085,"1618":1045,"1676":1030,"1677":1030,"1678":1030,"1612":1030,"1611":1030,"1605":1030,"1636":1030,"1633":1030,"1625":1030,"1635":1030,"1620":1030,"2337":1030,"1681":1030,"1608":1030,"2190":1050,"1631":1015,"1616":1015,"1624":1015,"1634":1000,"1627":1000,"1622":1000,"1619":990,"1606":1000,"2338":1020,"1737":1020,"1757":1000,"2189":1000,"1756":1000,"1755":1000,"1733":1000,"1743":1000,"1688":1000,"1683":1000,"1685":1000,"1684":1000,"1687":1000,"1742":1000,"1682":1000,"1738":1000,"1735":1000,"1736":1000,"1740":1000,"1744":1000,"1741":1000,"1793":1000,"1794":1000,"1763":1015,"1776":1035,"1821":1040,"1770":1040,"1819":1040,"1790":1040,"1791":1040,"1766":1040,"1764":1040,"1769":1040,"1777":1040,"1767":1040,"1686":1040,"1768":1040,"1775":1040,"1778":1040,"1789":1040,"1779":1040,"1792":1040,"1762":1040,"1786":1040,"1787":1040,"1788":1040,"2184":1040,"1823":1040,"1781":1040,"1822":1045,"1830":1040,"1765":1040,"1843":1040,"1844":1040,"1825":1045,"1829":1100,"1845":1120,"1841":1120,"1827":1120,"1828":1120,"1839":1120,"1840":1120,"1846":1120,"1919":1220,"1857":1220,"1866":1230,"1931":1225,"1820":1225,"1929":1225,"1924":1225,"1926":1225,"1925":1225,"1854":1225,"1852":1225,"1861":1225,"1863":1225,"1862":1225,"1858":1225,"1860":1225,"1865":1225,"1928":1225,"1930":1225,"1867":1225,"1921":1225,"1871":1225,"1917":1225,"1920":1225,"1922":1225,"1923":1225,"2185":1225,"1870":1225,"1927":1235,"1864":1235,"1859":1235,"1856":1235,"1869":1235,"1853":1265,"1868":1250,"1918":1265,"1979":1265,"2013":1280,"2006":1280,"1996":1280,"1978":1280,"1980":1280,"1981":1280,"2007":1300,"1997":1300,"1982":1300,"1988":1300,"1998":1365,"2019":1365,"1965":1365,"2018":1365,"1992":1365,"1994":1365,"1970":1365,"1968":1365,"1995":1365,"2000":1365,"2001":1365,"2002":1365,"2003":1365,"2004":1365,"2008":1365,"2009":1365,"2010":1365,"2011":1365,"2012":1365,"2014":1365,"1984":1365,"1986":1365,"1989":1365,"1990":1365,"1991":1365,"2186":1365,"1983":1405,"1993":1405,"1976":1405,"1974":1405,"1977":1405,"1969":1420,"1999":1420,"2005":1420,"1985":1420,"1987":1420,"2022":1465,"2042":1500,"2043":1500,"2048":1445,"2035":1445,"2034":1445,"2036":1445,"2037":1445,"2044":1435,"2039":1435,"2180":1370,"2027":1370,"2106":1370,"2182":1370,"2110":1370,"2112":1370,"2063":1370,"2052":1370,"2046":1370,"2045":1370,"2047":1370,"2131":1370,"2049":1370,"2050":1370,"2051":1370,"2053":1370,"2020":1370,"2040":1370,"2041":1370,"2100":1370,"2108":1370,"2187":1370,"2128":1395,"2130":1395,"2067":1395,"2096":1395,"2098":1395,"2056":1395,"2094":1355,"2058":1355,"2059":1355,"2181":1305,"2077":1305,"2107":1305,"2183":1305,"2111":1305,"2113":1305,"2064":1305,"2136":1305,"2137":1305,"2129":1305,"2126":1305,"2127":1305,"2114":1305,"2115":1305,"2117":1305,"2118":1305,"2119":1305,"2120":1305,"2121":1305,"2122":1305,"2123":1305,"2124":1305,"2125":1305,"2132":1305,"2133":1305,"2134":1305,"2135":1305,"2264":1305,"2138":1305,"2139":1305,"2140":1305,"2141":1305,"2142":1305,"2143":1305,"2144":1305,"2095":1305,"2105":1305,"2145":1305,"2062":1305,"2099":1305,"2101":1305,"2102":1305,"2103":1305,"2104":1305,"2109":1305,"2188":1305,"2078":1305,"2272":1305,"2116":1305,"2097":1305,"2225":1305,"2263":1260,"2282":1260,"2281":1265,"2250":1265,"2226":1265,"2266":1265,"2229":1260,"2228":1260,"2247":1245,"2248":1245,"2243":1235,"2286":1235,"2238":1235,"2287":1235,"2230":1235,"2231":1235,"2221":1235,"2277":1235,"2278":1235,"2280":1235,"2252":1235,"2254":1235,"2257":1235,"2258":1235,"2260":1235,"2261":1235,"2265":1235,"2267":1235,"2269":1235,"2270":1235,"2273":1235,"2274":1235,"2275":1235,"2276":1235,"2219":1235,"2232":1235,"2234":1235,"2235":1235,"2236":1235,"2237":1235,"2288":1235,"2239":1215,"2227":1215,"2244":1195,"2262":1195,"2220":1185,"2245":1180,"2246":1180,"2279":1180,"2253":1180,"2255":1180,"2259":1180,"2268":1180,"2271":1180,"2251":1180,"2241":1180,"2242":1180,"2233":1180,"2240":1180,"2320":1220,"2317":1220,"2289":1220,"2293":1220,"2313":1220,"2314":1220,"2256":1225,"2308":1180,"2303":1180,"2332":1180,"2384":1180,"2318":1180,"2334":1180,"2310":1180,"2311":1180,"2306":1180,"2309":1180,"2295":1180,"2297":1180,"2292":1180,"2290":1180,"2294":1180,"2296":1180,"2315":1180,"2301":1180,"2302":1180,"2304":1180,"2305":1180,"2333":1180,"2307":1135,"2291":1135,"2397":1140,"2398":1140,"2396":1140,"2377":1140,"2391":1120,"2343":1120,"2344":1120,"2385":1120,"2387":1120,"2345":1120,"2367":1120,"2389":1120,"2390":1120,"2364":1120,"2403":1120,"2394":1120,"2399":1120,"2401":1120,"2369":1120,"2376":1120,"2370":1120,"2380":1120,"2382":1120,"2386":1120,"2388":1120,"2457":1120,"2366":1100,"2393":1100,"2379":1100,"2378":1100,"2368":1055,"2400":1055,"2371":1055,"2395":1065,"2402":1065,"2392":1065,"2501":1070,"2482":1070,"2453":1105,"2381":1105,"2383":1105,"2476":1105,"2493":1160,"2491":1160,"2480":1215,"2483":1215,"2470":1215,"2474":1215,"2472":1230,"2488":1230,"2602":1230,"2478":1230,"2481":1230,"2479":1230,"2458":1230,"2459":1230,"2494":1230,"2497":1230,"2495":1230,"2489":1230,"2486":1230,"2666":1230,"2487":1205,"2471":1205,"2484":1215,"2473":1225,"2490":1225,"2492":1225,"2475":1225,"2477":1225,"2557":1225,"2574":1225,"2589":1225,"2591":1225,"2565":1225,"2598":1230,"2586":1230,"2553":1220,"2609":1220,"2566":1220,"2543":1220,"2548":1220,"2551":1220,"2575":1220,"2595":1220,"2594":1220,"2593":1220,"2577":1220,"2578":1220,"2579":1220,"2607":1220,"2549":1220,"2559":1220,"2533":1220,"2536":1220,"2538":1220,"2540":1220,"2667":1220,"2567":1230,"2590":1230,"2580":1230,"2600":1230,"2599":1230,"2554":1230,"2610":1230,"2612":1230,"2544":1230,"2550":1230,"2552":1230,"2587":1230,"2560":1230,"2534":1230,"2537":1230,"2539":1230,"2541":1230,"2614":1230,"2668":1230,"2582":1230,"2555":1285,"2597":1300,"2605":1300,"2581":1300,"2583":1300,"2606":1300,"2601":1300,"2588":1300,"2569":1300,"2625":1325,"2611":1325,"2613":1325,"2623":1325,"2624":1325,"2622":1325,"2626":1325,"2584":1325,"2585":1325,"2670":1325,"2616":1325,"2561":1325,"2608":1325,"2542":1325,"2615":1325,"2618":1325,"2619":1325,"2620":1325,"2621":1325,"2617":1325};
+const TC_COMPROBANTE_OVERRIDE=JSON.parse(JSON.stringify(TC_COMPROBANTE_OVERRIDE_SEED));
+function parseTcOverride(rows){
+  const S=s=>(s==null?"":(""+s).trim());
+  const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
+  const header=(rows[0]||[]).map(S);
+  let idxComp=header.findIndex(h=>/comprobante/i.test(h)); if(idxComp<0) idxComp=0;
+  let idxTc=header.findIndex(h=>/tc.*(bill|blue)|(bill|blue).*tc/i.test(h)); if(idxTc<0) idxTc=1;
+  const out={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const comp=S(r[idxComp]); if(!comp) continue;
+    const tc=N(r[idxTc]); if(!tc) continue;
+    out[comp]=tc;
+  }
+  return out;
+}
+async function onCargarTcOverride(file){
+  const msg=document.getElementById("tcOvMsg");
+  msg.className="updmsg"; msg.textContent="Leyendo archivo...";
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:"array",cellDates:true});
+    const sheetName=wb.SheetNames.includes("TC")?"TC":wb.SheetNames[0];
+    const ws=wb.Sheets[sheetName];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
+    const nuevo=parseTcOverride(rows);
+    const n=Object.keys(nuevo).length;
+    if(!n) throw new Error('No encontré filas válidas (columnas "Nro. comprobante" y "TC Bill" esperadas) en la hoja "'+sheetName+'".');
+    // Reemplaza toda la tabla anterior (no la mezcla) -- esta lista es la fuente completa y actual
+    // de correcciones, igual criterio que el resto de la app.
+    Object.keys(TC_COMPROBANTE_OVERRIDE).forEach(k=>delete TC_COMPROBANTE_OVERRIDE[k]);
+    Object.assign(TC_COMPROBANTE_OVERRIDE,nuevo);
+    await guardarClave('TC_COMPROBANTE_OVERRIDE',TC_COMPROBANTE_OVERRIDE);
+    msg.className="updmsg ok";
+    msg.textContent="✓ Tabla TC actualizada: "+n+" comprobante(s) con dólar blue corregido (hoja \""+sheetName+"\"), reemplaza por completo a la tabla anterior. Para que el cálculo de USD Billete de esos movimientos ContaParam se actualice en Estado de Resultados/Presupuesto/Proyectos, volvé a subir el informe crudo correspondiente (si esos meses ya están bloqueados en \"Bloquear hasta:\", primero tenés que desbloquearlos).";
+  }catch(e){
+    msg.className="updmsg err"; msg.textContent="Error procesando el archivo: "+e.message;
+    console.error(e);
+  }
+}
 async function guardarTodoEnSupabase(){
   await Promise.all([
     guardarClave('DATA',{grupos:DATA.grupos,meses:DATA.meses}),
@@ -828,15 +877,16 @@ async function guardarTodoEnSupabase(){
     guardarClave('PROY_CTRL_MANUAL',PROY_CTRL_MANUAL),
     guardarClave('CMV_AVISOS',CMV_AVISOS),
     guardarClave('HIST_LOCK',HIST_LOCK),
+    guardarClave('TC_COMPROBANTE_OVERRIDE',TC_COMPROBANTE_OVERRIDE),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
     cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
-    cargarClave('HIST_LOCK')
+    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -850,6 +900,7 @@ async function cargarTodoDesdeSupabase(){
   if(pman){ Object.assign(PROY_CTRL_MANUAL,pman); hubo=true; }
   if(cav){ CMV_AVISOS=cav; hubo=true; }
   if(hl){ Object.assign(HIST_LOCK,hl); hubo=true; }
+  if(tco&&Object.keys(tco).length){ Object.keys(TC_COMPROBANTE_OVERRIDE).forEach(k=>delete TC_COMPROBANTE_OVERRIDE[k]); Object.assign(TC_COMPROBANTE_OVERRIDE,tco); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -1035,8 +1086,17 @@ function tcOficFor(dstr,origen,ars,ext){
   if(LIVE_TC.ofic!=null) return LIVE_TC.ofic;
   return null;
 }
-function tcBillFor(dstr,origen,cotiz){
-  if((origen==="ContaParam"||origen==="ContaOC")&&cotiz) return cotiz;
+function tcBillFor(dstr,origen,cotiz,comprobante){
+  // ContaParam: primero se busca una correccion manual por Nro. de comprobante (TC_COMPROBANTE_OVERRIDE
+  // -- ver mas abajo); si ese comprobante no esta en la tabla, se usa la cotizacion propia del asiento
+  // (cotiz/NA2) como siempre. Mismo criterio que la formula de Excel de Micaela.
+  if(origen==="ContaParam"){
+    const ov=comprobante!=null?TC_COMPROBANTE_OVERRIDE[comprobante]:null;
+    if(ov!=null) return ov;
+    if(cotiz) return cotiz;
+  } else if(origen==="ContaOC"&&cotiz){
+    return cotiz;
+  }
   const v=buscarCotizAtras(HIST_CAMBIARIO.bill,dstr); if(v!=null) return v;
   if(LIVE_TC.bill!=null) return LIVE_TC.bill;
   return null;
@@ -1073,8 +1133,8 @@ function parseRawLedgerEERR(rows){
     const fecha=parseFechaCell(r[5]); if(!fecha) continue;
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
     const dstr=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0")+"-"+String(fecha.getUTCDate()).padStart(2,"0");
-    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
-    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]), comprobante=S(r[7]);
+    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz,comprobante), axiF=axiFactorFor(y);
     const usdOfic=tcOfic?ars/tcOfic:null, usdBill=tcBill?ars/tcBill:null, axi=axiF!=null?ars*axiF:null;
     if(usdOfic==null||usdBill==null||axi==null){
       sinCotiz.push({fila:i+1,fecha:dstr,motivo:[usdOfic==null&&"TC Ofic",usdBill==null&&"TC Bill",axiF==null&&"AXI"].filter(Boolean).join(", ")});
@@ -1125,8 +1185,8 @@ function parseRawLedgerCuentas(rows){
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
     mesesSet.add(y);
     const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
-    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
-    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]), comprobante=S(r[7]);
+    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz,comprobante), axiF=axiFactorFor(y);
     const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0, axi=axiF!=null?ars*axiF:0;
     const k=cuenta+"\u241F"+grupo;
     if(!cagg[k]) cagg[k]={};
@@ -1191,8 +1251,8 @@ function parseRawLedgerProyectos(rows){
     const fecha=parseFechaCell(r[5]); if(!fecha) continue;
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
     const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
-    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
-    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz), axiF=axiFactorFor(y);
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]), comprobante=S(r[7]);
+    const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz,comprobante), axiF=axiFactorFor(y);
     const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0, axi=axiF!=null?ars*axiF:0;
     if(!pagg[cod]) pagg[cod]={desc:desc,cats:{},comprasProv:{},comprasDet:{}};
     if(desc && desc.length>(pagg[cod].desc||"").length) pagg[cod].desc=desc;
@@ -1281,12 +1341,12 @@ function parseRawLedgerCMV(rows){
     const fecha=parseFechaCell(r[5]); if(!fecha) continue;
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
     const dstr=y+"-"+String(fecha.getUTCDate()).padStart(2,"0");
-    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]);
-    const key=S(r[6])+"␟"+S(r[7]);
+    const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]), comprobante=S(r[7]);
+    const key=S(r[6])+"␟"+comprobante;
     const clasifs=comp02[key]||new Set();
     const esVentaCMV=[...clasifs].some(d=>A_VENTA_CMV.has(d));
     if(esVentaCMV){
-      const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz);
+      const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz,comprobante);
       const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0;
       if(!agg[cod]) agg[cod]={desc,movs:{}};
       if(desc && desc.length>(agg[cod].desc||"").length) agg[cod].desc=desc;
@@ -1765,6 +1825,13 @@ async function onCargarInformeCrudo(file){
   if(btn2&&inp2){
     btn2.addEventListener("click",()=>inp2.click());
     inp2.addEventListener("change",ev=>{const file=ev.target.files[0];if(file)onCargarInformeCrudo(file);ev.target.value="";});
+  }
+})();
+(function(){
+  const btn=document.getElementById("tcOvBtn"),inp=document.getElementById("tcOvFile");
+  if(btn&&inp){
+    btn.addEventListener("click",()=>inp.click());
+    inp.addEventListener("change",ev=>{const file=ev.target.files[0];if(file)onCargarTcOverride(file);ev.target.value="";});
   }
 })();
 (function(){
