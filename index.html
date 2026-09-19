@@ -848,6 +848,19 @@ function poblarGrupoApertura(){
   grupos.forEach(g=>gsel.add(new Option(g+" ("+g.length+")",g)));
   if(grupos.includes(actual)) gsel.value=actual;
 }
+// Diagnostico: para cada Concepto (segun CLASIF_APERTURA_FN), que Grupo(s) real(es) tienen sus
+// transacciones -- sin depender del filtro de Grupo elegido arriba. JSON.stringify muestra comillas
+// alrededor, asi un grupo vacio ("") o con espacios (" ") se nota a simple vista.
+function debugGruposPorConcepto(cuenta){
+  const clasFn=CLASIF_APERTURA_FN[cuenta]; if(!clasFn) return {};
+  const out={};
+  (APERTURA_DETALLE[cuenta]||[]).forEach(t=>{
+    const c=clasFn(t)||"Otros";
+    if(!out[c]) out[c]=new Set();
+    out[c].add(JSON.stringify(t.grupo)+" ("+((t.grupo||"").length)+")");
+  });
+  return out;
+}
 function initPtoApertura(){
   const sel=document.getElementById("paCuenta");
   sel.innerHTML="";APERTURA_CUENTAS.forEach(c=>sel.add(new Option(c,c)));
@@ -949,7 +962,9 @@ function renderPtoApertura(){
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).`;
+  const debugGrupos=debugGruposPorConcepto(cuenta);
+  const debugTxt=Object.keys(debugGrupos).sort().map(c=>esc(c)+": "+[...debugGrupos[c]].map(esc).join(", ")).join(" · ");
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">Grupo real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
 }
 // Segunda tabla: Pto de CADA concepto mes a mes (no el real) -- muestra como se compone el Pto
