@@ -833,7 +833,10 @@ function ultimoAnioApertura(){
 window.ultimoAnioApertura=ultimoAnioApertura;
 function poblarGrupoApertura(){
   const cuenta=document.getElementById("paCuenta").value;
-  const grupos=APERTURA_GRUPOS[cuenta]||[];
+  // Las opciones salen de los grupos que realmente aparecen en los datos cargados (no de una lista
+  // fija) -- asi el filtro siempre coincide exacto con lo que hay, sin depender de adivinar el string
+  // tal cual esta escrito en el crudo de Tango.
+  const grupos=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t.grupo).filter(Boolean))].sort();
   const gsel=document.getElementById("paGrupo");
   const actual=gsel.value;
   gsel.innerHTML='<option value="">Todos</option>';
@@ -855,7 +858,7 @@ function renderPtoApertura(){
   const cuenta=sel.value;
   const grupoSel=document.getElementById("paGrupo").value;
   const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
-  const todasT=grupoSel?todasTCuenta.filter(t=>t.grupo===grupoSel):todasTCuenta;
+  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t.grupo)===normApertura(grupoSel)):todasTCuenta;
   const meses=[...new Set(todasT.map(t=>t.mes))].sort();
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   // Auto-repara los selects de mes si quedaron desactualizados (ej. recien subiste un crudo nuevo
@@ -904,7 +907,7 @@ function renderPtoApertura(){
   // grupo (ej. "K) ESTRUCTURA" -> PRINCI+BERGER+Expensas, sin SPWORK) -- son "dos Ptos distintos"
   // que se ven sumados en una sola fila cuando el filtro esta en "Todos".
   const ptoConceptosTodos=Object.keys(APERTURA_PTO[cuenta]||{});
-  const ptoConceptos=grupoSel?ptoConceptosTodos.filter(k=>aperturaPtoGrupoDe(cuenta,k)===grupoSel):ptoConceptosTodos;
+  const ptoConceptos=grupoSel?ptoConceptosTodos.filter(k=>normApertura(aperturaPtoGrupoDe(cuenta,k))===normApertura(grupoSel)):ptoConceptosTodos;
   const tienePtoPorConcepto=!!ptoConceptosTodos.length;
   const ovCuenta=OVERRIDES[cuenta];
   const baseCuenta=ovCuenta?ovCuenta.base:"mensual";
@@ -952,7 +955,7 @@ function renderPtoApertura(){
 function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   const wrap=document.getElementById("paPtoWrap"), tabla=document.getElementById("paPtoTabla"), foot=document.getElementById("paPtoFoot");
   let ptoKeys=Object.keys(APERTURA_PTO[cuenta]||{});
-  if(grupoSel) ptoKeys=ptoKeys.filter(k=>aperturaPtoGrupoDe(cuenta,k)===grupoSel);
+  if(grupoSel) ptoKeys=ptoKeys.filter(k=>normApertura(aperturaPtoGrupoDe(cuenta,k))===normApertura(grupoSel));
   // Mismo orden manual que la tabla de arriba (APERTURA_ORDEN), para que las dos tablas se lean
   // consistentes; los conceptos con Pto que todavia no entraron en ese orden van al final.
   const ordenGuardado=(APERTURA_ORDEN[cuenta]||[]).filter(k=>ptoKeys.includes(k));
@@ -1878,12 +1881,15 @@ function mergeEERRIntoData(res){
    transaccion por transaccion (para poder ver de que se compone, ej. que proveedores). Se agrega
    de a una cuenta por vez, a pedido de Micaela -- ver CLASIF_APERTURA_FN mas abajo para la regla
    de cada una. Acotado a proposito (no todas las ~100 cuentas de Estructura) para no guardar de mas.
-   APERTURA_GRUPOS acota, ademas, a que grupos (columna "Desc. auxiliar") pertenece cada cuenta --
-   necesario porque el mismo nombre de cuenta ("Alquileres") puede aparecer bajo otro grupo que no
-   tiene nada que ver (ej. "Q) AJUSTES CTAS" para el ajuste por AXI de fin de ejercicio): sin este
-   filtro, esos importes se colaban en el detalle como si fueran gasto real de la cuenta. */
+   APERTURA_GRUPOS_EXCLUIR saca, ademas, los grupos que NO son gasto real de la cuenta aunque
+   compartan el mismo nombre (ej. "Q) AJUSTES CTAS" para el ajuste por AXI de fin de ejercicio, que
+   aparece bajo "Alquileres" pero no tiene nada que ver). Antes esto era un allowlist de 2 strings
+   exactos ("K) ESTRUCTURA"/"K) ESTRUCTURA NQN"): un solo caracter de diferencia con el crudo real
+   (un espacio, mayus/minus) dejaba afuera del detalle transacciones reales sin ningun aviso -- ahora
+   se admite cualquier grupo salvo el que se quiere excluir explicitamente, y el filtro "Grupo" de la
+   pantalla (poblarGrupoApertura) se arma con los grupos que realmente aparecen en los datos. */
 const APERTURA_CUENTAS=["Alquileres"];
-const APERTURA_GRUPOS={"Alquileres":["K) ESTRUCTURA","K) ESTRUCTURA NQN"]};
+const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -1903,7 +1909,7 @@ function parseRawLedgerCuentas(rows){
     if(!cagg[k]) cagg[k]={};
     if(!cagg[k][y]) cagg[k][y]=[0,0,0,0];
     const a=cagg[k][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
-    if(APERTURA_CUENTAS.includes(cuenta) && (!APERTURA_GRUPOS[cuenta]||APERTURA_GRUPOS[cuenta].includes(grupo))){
+    if(APERTURA_CUENTAS.includes(cuenta) && !(APERTURA_GRUPOS_EXCLUIR[cuenta]||[]).some(g=>normApertura(g)===normApertura(grupo))){
       if(!detalle[cuenta]) detalle[cuenta]=[];
       detalle[cuenta].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,ars:Math.round(ars*100)/100});
     }
@@ -2012,7 +2018,7 @@ async function saveAperturaPto(){ guardarClave('APERTURA_PTO',APERTURA_PTO); }
 // (ej. podria venir "PRINCI SRL" en vez de "PRINCI"). Para no depender de que coincida caracter a
 // caracter con la clave que carguemos en APERTURA_PTO, matchea por igualdad exacta primero y, si no
 // hay, por contencion (sin mayusc/minusc) en cualquiera de los dos sentidos.
-function normApertura(s){ return (s||"").toUpperCase().trim(); }
+function normApertura(s){ return (s||"").replace(/ /g," ").replace(/\s+/g," ").toUpperCase().trim(); }
 function aperturaPtoKeyFor(cuenta,concepto){
   const map=APERTURA_PTO[cuenta]; if(!map) return null;
   if(map[concepto]) return concepto;
