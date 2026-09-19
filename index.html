@@ -63,6 +63,8 @@ body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSys
 .sidebar .tab:hover{background:rgba(255,255,255,.06);}
 .sidebar .tab.active{background:var(--sb-active);color:#fff;}
 .sidebar .foot-user{margin-top:auto;font-size:11.5px;color:var(--sb-muted);padding:10px 6px 0;border-top:1px solid rgba(255,255,255,.08);}
+.subtab{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;}
+.subtab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
 .content{flex:1 1 auto;min-width:0;overflow-x:hidden;}
 .wrap{max-width:1200px;margin:0 auto;padding:26px 28px 60px;}
 header.top{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;}
@@ -113,14 +115,27 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
 #pTabla tbody td.fz{z-index:2;background:var(--card);}
 #pTabla thead th.fz{z-index:6;}
 #pTabla tr.result td.fz{background:#EDEBE1;}
-/* El "left" de las columnas fijas (fz) ya no es un valor fijo por CSS -- se recalcula en JS
-   (actualizarStickyPto) segun el ancho real de cada columna, porque ahora se pueden redimensionar
-   a mano y la de "Pto Pesos" se puede ocultar. Ver esa función. */
+/* Igual que .fz pero fijas del lado DERECHO (Total real / Desvío / Acumulado) -- para que "Cuenta"
+   hasta "Pto/mes" y "Total real" hasta "Acumulado" queden siempre visibles en los dos extremos,
+   dejando los meses del medio como la única franja que se desplaza horizontalmente. */
+#pTabla td.fzr,#pTabla th.fzr{position:sticky;}
+#pTabla tbody td.fzr{z-index:2;background:var(--card);}
+#pTabla thead th.fzr{z-index:6;}
+#pTabla tr.result td.fzr{background:#EDEBE1;}
+/* El "left"/"right" de las columnas fijas (fz/fzr) ya no es un valor fijo por CSS -- se recalcula
+   en JS (actualizarStickyPto/actualizarStickyPtoDerecha) segun el ancho real de cada columna,
+   porque se pueden redimensionar a mano y Base/Pto Pesos/Pto-mes se pueden ocultar. Ver esas funciones. */
 .fz1{min-width:150px;max-width:220px;}
 .fz2{min-width:44px;max-width:70px;text-align:center!important;}
 .fz3{min-width:52px;}
 .fz4{min-width:92px;}
 .fz5{min-width:76px;}
+/* Columnas de mes: ancho acotado para que entren muchas a la vez (al menos ~12 en una pantalla
+   normal, con Base/Pto Pesos/Pto-mes escondidos por defecto). */
+.mescol{min-width:70px;max-width:90px;}
+/* Los encabezados largos ("Acum. desde ..." etc.) pasan a dos líneas en vez de recortarse o
+   superponerse con la columna de al lado cuando la columna es angosta. */
+#pTabla thead th{white-space:normal;line-height:1.25;}
 /* Distinción visual entre columnas de gasto real (fondo plano) y columnas de info/cálculo
    (Pto, desvíos, acumulado, etc. -- fondo tenue para que se note de un vistazo cuál es cuál). */
 #pTabla td.info,#pTabla th.info{background:#F7F1E4;}
@@ -193,7 +208,6 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
     <nav>
       <button class="tab active" data-v="eerr">Estado de Resultados</button>
       <button class="tab" data-v="pto">Presupuesto · Estructura</button>
-      <button class="tab" data-v="ptohist">Historial Pto</button>
       <button class="tab" data-v="cmv">Proyectos · CMV</button>
       <button class="tab" data-v="proy">Control Proyectos</button>
       <button class="tab" data-v="dic">Diccionario</button>
@@ -241,32 +255,38 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
 </div>
 
 <div id="view-pto" style="display:none">
-  <div class="controls">
-    <div class="ctl"><label for="pBloque">Bloque</label><select id="pBloque"><option value="K) ESTRUCTURA">Estructura</option><option value="K) ESTRUCTURA NQN">Estructura NQN</option><option value="N) SUELDOS">Sueldos</option><option value="O) IMPUESTOS">Impuestos</option></select></div>
-    <div class="ctl"><label for="pMoneda">Moneda</label><select id="pMoneda"><option value="0" selected>Pesos ($)</option><option value="1">USD Oficial</option><option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
-    <div class="ctl"><label for="pResp">Responsable</label><select id="pResp"></select></div>
-    <div class="ctl"><label for="pFiltro">Cuentas</label><select id="pFiltro"><option value="datos">Con presupuesto o gasto</option><option value="todas">Todas las cuentas</option></select></div>
-    <div class="ctl"><label for="pDesde">Desde</label><select id="pDesde"></select></div>
-    <div class="ctl"><label for="pHasta">Hasta</label><select id="pHasta"></select></div>
-    <div class="ctl"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;padding:9px 0"><input type="checkbox" id="pTogglePtoPesos" checked> Mostrar columna "Pto Pesos"</label></div>
-    <span class="note">Cargá el presupuesto en <b>pesos de hoy</b> (fecha base abajo). En <b>pesos</b> se muestra plano; en <b>AXI</b> ajustado por inflación; en <b>USD</b> queda fijo al cierre del 30/06. Editable; se guarda en este navegador.</span>
+  <div class="subtabs" style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="subtab active" id="ptoSubBtnMain" onclick="showPtoSub('main')">Presupuesto</button>
+    <button class="subtab" id="ptoSubBtnHist" onclick="showPtoSub('hist')">Historial de cambios</button>
   </div>
-  <div id="ptoCfg" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
-  <div class="kpis" id="pKpis"></div>
-  <div class="bar"><div class="lock"><span id="lockState">Edición bloqueada</span><input id="lockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="btnLock">Desbloquear (Gerencia)</button></div><button class="btn" id="btnCsv">Descargar Excel</button><button class="btn" id="btnPdf">Imprimir / PDF</button></div>
-  <div class="table-wrap pto-wrap"><table id="pTabla"></table></div>
-  <div class="foot" id="pFoot"></div>
-</div>
-<div id="view-ptohist" style="display:none">
-  <div class="controls">
-    <div class="ctl"><label for="phCuenta">Cuenta</label><select id="phCuenta"></select></div>
-    <div class="ctl"><label for="phMes">Desde</label><select id="phMes"></select></div>
-    <div class="ctl"><label for="phPto">Nuevo Pto ($, en pesos de ese mes)</label><input id="phPto" type="text" inputmode="numeric" placeholder="0" style="width:150px"></div>
-    <div class="ctl"><label>&nbsp;</label><button class="btn" id="phAddBtn">Agregar vigencia</button></div>
-    <span class="note" id="phLockNote"></span>
+  <div id="ptoSubMain">
+    <div class="controls">
+      <div class="ctl"><label for="pBloque">Bloque</label><select id="pBloque"><option value="K) ESTRUCTURA">Estructura</option><option value="K) ESTRUCTURA NQN">Estructura NQN</option><option value="N) SUELDOS">Sueldos</option><option value="O) IMPUESTOS">Impuestos</option></select></div>
+      <div class="ctl"><label for="pMoneda">Moneda</label><select id="pMoneda"><option value="0" selected>Pesos ($)</option><option value="1">USD Oficial</option><option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
+      <div class="ctl"><label for="pResp">Responsable</label><select id="pResp"></select></div>
+      <div class="ctl"><label for="pFiltro">Cuentas</label><select id="pFiltro"><option value="datos">Con presupuesto o gasto</option><option value="todas">Todas las cuentas</option></select></div>
+      <div class="ctl"><label for="pDesde">Desde</label><select id="pDesde"></select></div>
+      <div class="ctl"><label for="pHasta">Hasta</label><select id="pHasta"></select></div>
+      <div class="ctl"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;padding:9px 0"><input type="checkbox" id="pTogglePtoPesos"> Mostrar Base / Pto ($) / Pto mes</label></div>
+      <span class="note">Cargá el presupuesto en <b>pesos de hoy</b> (fecha base abajo). En <b>pesos</b> se muestra plano; en <b>AXI</b> ajustado por inflación; en <b>USD</b> queda fijo al cierre del 30/06. Editable; se guarda en este navegador.</span>
+    </div>
+    <div id="ptoCfg" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
+    <div class="kpis" id="pKpis"></div>
+    <div class="bar"><div class="lock"><span id="lockState">Edición bloqueada</span><input id="lockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="btnLock">Desbloquear (Gerencia)</button></div><button class="btn" id="btnCsv">Descargar Excel</button><button class="btn" id="btnPdf">Imprimir / PDF</button></div>
+    <div class="table-wrap pto-wrap"><table id="pTabla"></table></div>
+    <div class="foot" id="pFoot"></div>
   </div>
-  <div class="table-wrap"><table id="phTabla"></table></div>
-  <div class="foot" id="phFoot">Cada cambio de Presupuesto queda acá, con la fecha desde la que aplica — nada se sobreescribe. El bloqueo de edición es el mismo que en Presupuesto·Estructura.</div>
+  <div id="ptoSubHist" style="display:none">
+    <div class="controls">
+      <div class="ctl"><label for="phCuenta">Cuenta</label><select id="phCuenta"></select></div>
+      <div class="ctl"><label for="phMes">Desde</label><select id="phMes"></select></div>
+      <div class="ctl"><label for="phPto">Nuevo Pto ($, en pesos de ese mes)</label><input id="phPto" type="text" inputmode="numeric" placeholder="0" style="width:150px"></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" id="phAddBtn">Agregar vigencia</button></div>
+      <span class="note" id="phLockNote"></span>
+    </div>
+    <div class="table-wrap"><table id="phTabla"></table></div>
+    <div class="foot" id="phFoot">Cada cambio de Presupuesto queda acá, con la fecha desde la que aplica — nada se sobreescribe. El bloqueo de edición es el mismo que en Presupuesto·Estructura.</div>
+  </div>
 </div>
 <div id="view-cmv" style="display:none">
     <div class="controls">
@@ -482,7 +502,19 @@ function renderCharts(pg,meses,bloques){
 }
 
 /* ===== tabs ===== */
-function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-ptohist").style.display=v==="ptohist"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.getElementById("view-dic").style.display=v==="dic"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));if(v==="dic")initDic();if(v==="ptohist")renderPtoHist();}
+function showView(v){document.getElementById("view-eerr").style.display=v==="eerr"?"":"none";document.getElementById("view-pto").style.display=v==="pto"?"":"none";document.getElementById("view-cmv").style.display=v==="cmv"?"":"none";document.getElementById("view-proy").style.display=v==="proy"?"":"none";document.getElementById("view-dic").style.display=v==="dic"?"":"none";document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.v===v));if(v==="dic")initDic();if(v==="pto")showPtoSub("main");}
+// Sub-pestañas dentro de Presupuesto·Estructura: "Presupuesto" (la tabla) e "Historial de cambios"
+// (antes era una pestaña propia del nivel superior, pero ocupaba mucho lugar para algo que se usa
+// poco -- ahora vive adentro, sin competir con las pestañas principales).
+function showPtoSub(v){
+  document.getElementById("ptoSubMain").style.display=v==="main"?"":"none";
+  document.getElementById("ptoSubHist").style.display=v==="hist"?"":"none";
+  document.getElementById("ptoSubBtnMain").classList.toggle("active",v==="main");
+  document.getElementById("ptoSubBtnHist").classList.toggle("active",v==="hist");
+  if(v==="hist") renderPtoHist();
+  else requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); });
+}
+window.showPtoSub=showPtoSub;
 
 /* ===== Presupuesto ===== */
 let editable=false;
@@ -591,7 +623,8 @@ async function initPto(){
   const pr=document.getElementById("pResp");pr.add(new Option("Todos los responsables",""));resps.forEach(r=>pr.add(new Option(r,r)));
   const ms=pMonths(),pd=document.getElementById("pDesde"),ph=document.getElementById("pHasta");
   ms.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
-  pd.value=0;ph.value=ms.length-1;
+  const idxFechaBase=ms.indexOf((OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM);
+  pd.value=idxFechaBase>=0?idxFechaBase:0;ph.value=ms.length-1;
   ["pResp","pFiltro","pDesde","pHasta","pBloque"].forEach(id=>document.getElementById(id).addEventListener("change",renderPto));
   document.getElementById("pTabla").addEventListener("change",e=>{
     if(!editable)return;const c=e.target.dataset.c;if(!c||!OVERRIDES[c])return;
@@ -612,13 +645,13 @@ async function initPto(){
   document.getElementById("pTabla").addEventListener("click",e=>{
     const vigLink=e.target.closest(".vig-link");
     if(vigLink){
-      showView("ptohist");
+      showPtoSub("hist");
       const sel=document.getElementById("phCuenta");
       if(sel){ sel.value=vigLink.dataset.c; renderPtoHist(); }
     }
   });
   const togglePto=document.getElementById("pTogglePtoPesos");
-  if(togglePto)togglePto.addEventListener("change",()=>{pMostrarPtoPesos=togglePto.checked;renderPto();});
+  if(togglePto)togglePto.addEventListener("change",()=>{pMostrarDetallePto=togglePto.checked;renderPto();});
   document.getElementById("btnCsv").addEventListener("click",exportTabla);
   document.getElementById("btnPdf").addEventListener("click",()=>window.print());
   document.getElementById("btnLock").addEventListener("click",onLockClick);
@@ -746,11 +779,14 @@ function ptoTh(label,col,rows){
   return '<span style="cursor:pointer;user-select:none" onclick="ptoSortToggle(\''+col+'\')" title="Ordenar">'+esc(label)+'<span style="font-size:9px;color:'+(sorting?'#1a7a3a;font-weight:900':'var(--muted)')+'">'+arrow+'</span></span> '
     +'<span class="ptofbtn" style="cursor:pointer;user-select:none" title="Filtrar" data-col="'+col+'"><span style="font-size:9px;'+(active?'color:#1a7a3a;font-weight:900':'color:var(--muted)')+'">▼</span></span>';
 }
-// Recalcula el "left" de las columnas fijas (sticky) segun su ancho REAL renderizado -- necesario
-// porque ahora las columnas se pueden redimensionar a mano y/o ocultar (Pto Pesos), asi que un
-// left fijo en CSS quedaria desactualizado. Se llama despues de cada render y despues de cada resize.
+// Recalcula el "left"/"right" de las columnas fijas (sticky, izquierda y derecha) segun su ancho
+// REAL renderizado -- necesario porque las columnas se pueden redimensionar a mano y/o ocultar
+// (Base/Pto Pesos/Pto-mes), asi que un valor fijo en CSS quedaria desactualizado. offsetParent
+// null = la tabla esta oculta (display:none en algun ancestro, ej. otra sub-pestaña o pestaña):
+// getBoundingClientRect().width daria 0 para todo y calcularia mal, asi que en ese caso no se toca
+// nada -- se vuelve a llamar cuando la tabla se hace visible (showPtoSub).
 function actualizarStickyPto(){
-  const table=document.getElementById("pTabla"); if(!table) return;
+  const table=document.getElementById("pTabla"); if(!table||table.offsetParent===null) return;
   const ths=[...table.querySelectorAll("thead th")];
   let acc=0,css="";
   for(let i=0;i<ths.length;i++){
@@ -762,7 +798,26 @@ function actualizarStickyPto(){
   if(!styleEl){ styleEl=document.createElement("style"); styleEl.id="pTablaStickyCSS"; document.head.appendChild(styleEl); }
   styleEl.textContent=css;
 }
-let pMostrarPtoPesos=true;
+function actualizarStickyPtoDerecha(){
+  const table=document.getElementById("pTabla"); if(!table||table.offsetParent===null) return;
+  const ths=[...table.querySelectorAll("thead th")];
+  let acc=0,css="";
+  for(let i=ths.length-1;i>=0;i--){
+    if(!ths[i].classList.contains("fzr")) break;
+    css+=`#pTabla th:nth-child(${i+1}),#pTabla td:nth-child(${i+1}){right:${acc}px;}`;
+    acc+=ths[i].getBoundingClientRect().width;
+  }
+  let styleEl=document.getElementById("pTablaStickyDerechaCSS");
+  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id="pTablaStickyDerechaCSS"; document.head.appendChild(styleEl); }
+  styleEl.textContent=css;
+}
+window.addEventListener("resize",()=>{
+  if(document.getElementById("view-pto").style.display!=="none" && document.getElementById("ptoSubMain").style.display!=="none"){
+    actualizarStickyPto(); actualizarStickyPtoDerecha();
+  }
+});
+let pMostrarDetallePto=false; // Base/Pto Pesos/Pto-mes empiezan escondidos: son de consulta ocasional
+                               // y ocupan lugar que se necesita para ver más meses de gasto real.
   function renderPto(){
   const resp=document.getElementById("pResp").value;
   const allm=pMonths(), i0=+document.getElementById("pDesde").value, i1=+document.getElementById("pHasta").value;
@@ -804,47 +859,47 @@ let pMostrarPtoPesos=true;
     const realPer=reals.reduce((s,v)=>s+v,0);
     const ptoPer=meses.reduce((s,m)=>s+ptoMesFn(m),0);
     tPtoUlt+=ptoMesUlt;tRealUlt+=realUlt;tPtoPer+=ptoPer;tRealPer+=realPer;if(realPer>ptoPer)over++;
-    const cells=meses.map((m,k)=>{const v=reals[k],ptoM=ptoMesFn(m);return `<td class="real${v>ptoM?' over':''}">${v?fmt(v):"–"}</td>`;}).join("");
+    const cells=meses.map((m,k)=>{const v=reals[k],ptoM=ptoMesFn(m);return `<td class="real mescol${v>ptoM?' over':''}">${v?fmt(v):"–"}</td>`;}).join("");
     let acumCell;
     if(base==="anual"){
       const realAcum=mesesAcum.reduce((s,m)=>s+(c.serie[m]?c.serie[m][cur]:0),0);
       const ptoAnualCur=vigUlt?vigUlt.pto*fCur:0;
       const pctA=ptoAnualCur?realAcum/ptoAnualCur:null;
-      acumCell=pctA==null?`<td class="info mut">–</td>`:`<td class="info ${realAcum>ptoAnualCur?"over":"under"}">${(pctA*100).toFixed(0)}%</td>`;
+      acumCell=pctA==null?`<td class="info fzr mut">–</td>`:`<td class="info fzr ${realAcum>ptoAnualCur?"over":"under"}">${(pctA*100).toFixed(0)}%</td>`;
     }else{
       const acumMes=mesesAcum.reduce((s,m)=>s+((c.serie[m]?c.serie[m][cur]:0)-ptoMesFn(m)),0);
       tAcumMensual+=acumMes;
-      acumCell=`<td class="info ${acumMes>0?"over":"under"}">${fmt(acumMes)}</td>`;
+      acumCell=`<td class="info fzr ${acumMes>0?"over":"under"}">${fmt(acumMes)}</td>`;
     }
-    const vigLink=`<span class="vig-link" data-c="${esc(c.key)}" title="Ver/editar historial de Pto (pestaña Historial Pto)" style="cursor:pointer;margin-left:5px;opacity:.55">🕘</span>`;
+    const vigLink=`<span class="vig-link" data-c="${esc(c.key)}" title="Ver/editar historial de Pto (Historial de cambios)" style="cursor:pointer;margin-left:5px;opacity:.55">🕘</span>`;
     const filaPrincipal=`<tr>
-      <td class="fz fz1 ell real" title="${esc(c.cuenta)}">${c.cuenta}</td>
+      <td class="fz fz1 ell real" title="${esc(c.cuenta)}">${c.cuenta}${vigLink}</td>
       <td class="fz fz2 ell real" title="${esc(c.responsable||"")}">${iniciales(c.responsable)}</td>
-      <td class="fz fz3 info"><select class="base-sel" data-c="${esc(c.key)}"${editable?"":" disabled"}><option value="mensual"${base==="mensual"?" selected":""}>M</option><option value="anual"${base==="anual"?" selected":""}>A</option></select></td>
-      ${pMostrarPtoPesos?`<td class="fz fz4 info"><input class="pto-inp" type="text" inputmode="numeric" data-c="${esc(c.key)}" value="${fmt(ptoShow)}"${editable?"":" disabled"}>${vigLink}</td>`:""}
-      <td class="fz fz5 grp info">${fmt(ptoMesUlt)}${pMostrarPtoPesos?"":vigLink}</td>${cells}
-      <td class="real"><b>${fmt(realPer)}</b></td>
-      <td class="info ${desvUlt>0?"over":"under"}">${fmt(desvUlt)}</td>
+      ${pMostrarDetallePto?`<td class="fz fz3 info"><select class="base-sel" data-c="${esc(c.key)}"${editable?"":" disabled"}><option value="mensual"${base==="mensual"?" selected":""}>M</option><option value="anual"${base==="anual"?" selected":""}>A</option></select></td>
+      <td class="fz fz4 info"><input class="pto-inp" type="text" inputmode="numeric" data-c="${esc(c.key)}" value="${fmt(ptoShow)}"${editable?"":" disabled"}></td>
+      <td class="fz fz5 grp info">${fmt(ptoMesUlt)}</td>`:""}${cells}
+      <td class="real fzr"><b>${fmt(realPer)}</b></td>
+      <td class="info fzr ${desvUlt>0?"over":"under"}">${fmt(desvUlt)}</td>
       ${acumCell}</tr>`;
     return filaPrincipal;
   }).join("");
   const tDesvUlt=tRealUlt-tPtoUlt;
-  const totCells=colTot.map(v=>`<td><b>${v?fmt(v):"–"}</b></td>`).join("");
-  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td><td class="fz fz2"></td><td class="fz fz3 info"></td>${pMostrarPtoPesos?`<td class="fz fz4 info"></td>`:""}<td class="fz fz5 grp info">${fmt(tPtoUlt)}</td>${totCells}<td class="real"><b>${fmt(tRealPer)}</b></td><td class="info ${tDesvUlt>0?"over":"under"}">${fmt(tDesvUlt)}</td><td class="info ${tAcumMensual>0?"over":"under"}" title="Suma solo de cuentas mensuales; las anuales se ven en % por fila">${fmt(tAcumMensual)}</td></tr>`;
-  const monthHdr=meses.map(m=>`<th class="real">${mesLabel(m)}</th>`).join("");
+  const totCells=colTot.map(v=>`<td class="mescol"><b>${v?fmt(v):"–"}</b></td>`).join("");
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td><td class="fz fz2"></td>${pMostrarDetallePto?`<td class="fz fz3 info"></td><td class="fz fz4 info"></td><td class="fz fz5 grp info">${fmt(tPtoUlt)}</td>`:""}${totCells}<td class="real fzr"><b>${fmt(tRealPer)}</b></td><td class="info fzr ${tDesvUlt>0?"over":"under"}">${fmt(tDesvUlt)}</td><td class="info fzr ${tAcumMensual>0?"over":"under"}" title="Suma solo de cuentas mensuales; las anuales se ven en % por fila">${fmt(tAcumMensual)}</td></tr>`;
+  const monthHdr=meses.map(m=>`<th class="real mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("pTabla").className="grid";
   document.getElementById("pTabla").innerHTML=
     `<thead><tr>
       <th class="fz fz1 real">${ptoTh("Cuenta","cuenta",rowsPreCol)}</th>
       <th class="fz fz2 real">${ptoTh("Resp.","responsable",rowsPreCol)}</th>
-      <th class="fz fz3 info">${ptoTh("Base","base",rowsPreCol)}</th>
-      ${pMostrarPtoPesos?`<th class="fz fz4 info">Pto ${curTag}<br><small style="font-weight:400;opacity:.6">base ${esc(mesLabel(fechaBaseYM))}</small></th>`:""}
-      <th class="fz fz5 grp info">Pto/mes<br><small style="font-weight:400;opacity:.6">${esc(mesLabel(ultimo||fechaBaseYM))}</small></th>${monthHdr}
-      <th class="real">Total real</th><th class="info">Desvío últ. mes</th><th class="info">Acum. desde ${esc(mesLabel(fechaBaseYM))}</th>
+      ${pMostrarDetallePto?`<th class="fz fz3 info">${ptoTh("Base","base",rowsPreCol)}</th>
+      <th class="fz fz4 info">Pto ${curTag}<br><small style="font-weight:400;opacity:.6">base ${esc(mesLabel(fechaBaseYM))}</small></th>
+      <th class="fz fz5 grp info">Pto/mes<br><small style="font-weight:400;opacity:.6">${esc(mesLabel(ultimo||fechaBaseYM))}</small></th>`:""}${monthHdr}
+      <th class="real fzr">Total real</th><th class="info fzr">Desvío últ. mes</th><th class="info fzr">Acum. desde ${esc(mesLabel(fechaBaseYM))}</th>
     </tr></thead><tbody>${body}${totalRow}</tbody>`;
   document.querySelectorAll('.ptofbtn').forEach(el=>el.addEventListener('click',ev=>openPtoColFilter(el.dataset.col,ev,rowsPreCol)));
   colResizeInit(document.getElementById("pTabla"));
-  requestAnimationFrame(actualizarStickyPto);
+  requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); });
   const respLegend=[...new Set(rows.map(c=>c.responsable).filter(Boolean))].sort().map(n=>`<b>${iniciales(n)}</b>=${esc(n.replace(/\s*,\s*/,", "))}`).join(" · ");
   document.getElementById("pKpis").innerHTML=
     `<div class="kpi"><div class="k-lbl">Real del período</div><div class="k-val">${curLbl} ${fmtM(tRealPer)}</div></div>
@@ -901,7 +956,7 @@ document.addEventListener('mousemove', e=>{
   if(!COLRESIZE_DRAG) return;
   const w=Math.max(32, COLRESIZE_DRAG.startW+(e.clientX-COLRESIZE_DRAG.startX));
   COLRESIZE_DRAG.th.style.width=w+'px';
-  if(COLRESIZE_DRAG.table.id==="pTabla") actualizarStickyPto();
+  if(COLRESIZE_DRAG.table.id==="pTabla"){ actualizarStickyPto(); actualizarStickyPtoDerecha(); }
 });
 document.addEventListener('mouseup', ()=>{
   if(!COLRESIZE_DRAG) return;
