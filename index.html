@@ -257,6 +257,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
 <div id="view-pto" style="display:none">
   <div class="subtabs" style="display:flex;gap:8px;margin-bottom:12px">
     <button class="subtab active" id="ptoSubBtnMain" onclick="showPtoSub('main')">Presupuesto</button>
+    <button class="subtab" id="ptoSubBtnApert" onclick="showPtoSub('apert')">Apertura de Estructura</button>
     <button class="subtab" id="ptoSubBtnHist" onclick="showPtoSub('hist')">Historial de cambios</button>
   </div>
   <div id="ptoSubMain">
@@ -275,6 +276,17 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
     <div class="bar"><div class="lock"><span id="lockState">Edición bloqueada</span><input id="lockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="btnLock">Desbloquear (Gerencia)</button></div><button class="btn" id="btnCsv">Descargar Excel</button><button class="btn" id="btnPdf">Imprimir / PDF</button></div>
     <div class="table-wrap pto-wrap"><table id="pTabla"></table></div>
     <div class="foot" id="pFoot"></div>
+  </div>
+  <div id="ptoSubApert" style="display:none">
+    <div class="controls">
+      <div class="ctl"><label for="paCuenta">Cuenta contable</label><select id="paCuenta"></select></div>
+      <div class="ctl"><label for="paDesde">Desde</label><select id="paDesde"></select></div>
+      <div class="ctl"><label for="paHasta">Hasta</label><select id="paHasta"></select></div>
+      <span class="note">Desglose transacción por transacción del crudo "02-EERR" para esta cuenta, agrupado por concepto. Se va agregando cuenta por cuenta, a pedido.</span>
+    </div>
+    <div class="kpis" id="paKpis"></div>
+    <div class="table-wrap"><table id="paTabla"></table></div>
+    <div class="foot" id="paFoot"></div>
   </div>
   <div id="ptoSubHist" style="display:none">
     <div class="controls">
@@ -508,10 +520,13 @@ function showView(v){document.getElementById("view-eerr").style.display=v==="eer
 // poco -- ahora vive adentro, sin competir con las pestañas principales).
 function showPtoSub(v){
   document.getElementById("ptoSubMain").style.display=v==="main"?"":"none";
+  document.getElementById("ptoSubApert").style.display=v==="apert"?"":"none";
   document.getElementById("ptoSubHist").style.display=v==="hist"?"":"none";
   document.getElementById("ptoSubBtnMain").classList.toggle("active",v==="main");
+  document.getElementById("ptoSubBtnApert").classList.toggle("active",v==="apert");
   document.getElementById("ptoSubBtnHist").classList.toggle("active",v==="hist");
   if(v==="hist") renderPtoHist();
+  else if(v==="apert") renderPtoApertura();
   else requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); });
 }
 window.showPtoSub=showPtoSub;
@@ -709,6 +724,54 @@ function renderPtoHist(){
       <td>${editable?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="eliminarVigencia('${esc(f.key).replace(/'/g,"\\'")}','${f.desde}')">Eliminar</button>`:""}</td>
     </tr>`).join("")||`<tr><td colspan="5" class="mut" style="padding:16px">Sin cambios de Pto registrados todavía${filtroKey?" para esta cuenta":""}.</td></tr>`;
   document.getElementById("phTabla").innerHTML=`<thead><tr><th>Cuenta</th><th>Resp.</th><th>Desde</th><th>Pto</th><th></th></tr></thead><tbody>${rowsHtml}</tbody>`;
+}
+/* ===== Apertura de Estructura: desglose transaccion por transaccion de una cuenta, agrupado por
+   "Concepto" segun la regla de CLASIF_APERTURA_FN. Se agrega cuenta por cuenta, a pedido. ===== */
+function poblarMesesApertura(){
+  const cuenta=document.getElementById("paCuenta").value;
+  const meses=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t.mes))].sort();
+  const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
+  pd.innerHTML="";ph.innerHTML="";
+  meses.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
+  pd.value=0;ph.value=Math.max(0,meses.length-1);
+}
+function initPtoApertura(){
+  const sel=document.getElementById("paCuenta");
+  sel.innerHTML="";APERTURA_CUENTAS.forEach(c=>sel.add(new Option(c,c)));
+  sel.addEventListener("change",()=>{poblarMesesApertura();renderPtoApertura();});
+  document.getElementById("paDesde").addEventListener("change",renderPtoApertura);
+  document.getElementById("paHasta").addEventListener("change",renderPtoApertura);
+  poblarMesesApertura();
+}
+function renderPtoApertura(){
+  const sel=document.getElementById("paCuenta"); if(!sel) return;
+  const cuenta=sel.value;
+  const todasT=APERTURA_DETALLE[cuenta]||[];
+  const meses=[...new Set(todasT.map(t=>t.mes))].sort();
+  const i0=+document.getElementById("paDesde").value||0, i1=+document.getElementById("paHasta").value||0;
+  const a=Math.min(i0,i1),b=Math.max(i0,i1);
+  const mesesSel=new Set(meses.slice(a,b+1));
+  const txs=todasT.filter(t=>mesesSel.has(t.mes));
+  const clasFn=CLASIF_APERTURA_FN[cuenta];
+  if(!clasFn){
+    document.getElementById("paKpis").innerHTML="";
+    document.getElementById("paTabla").innerHTML="";
+    document.getElementById("paFoot").innerHTML=`Todavía no definimos cómo clasificar "${esc(cuenta)}". Contame qué información querés ver acá (ej. como con Alquileres) y la agrego.`;
+    return;
+  }
+  const grupos={};
+  txs.forEach(t=>{
+    const concepto=clasFn(t)||"Otros";
+    if(!grupos[concepto]) grupos[concepto]={ars:0,n:0};
+    grupos[concepto].ars+=t.ars;grupos[concepto].n++;
+  });
+  const conceptos=Object.keys(grupos).sort((x,y)=>grupos[y].ars-grupos[x].ars);
+  const total=conceptos.reduce((s,k)=>s+grupos[k].ars,0);
+  const rowsHtml=conceptos.map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right">${fmt(grupos[k].ars)}</td><td style="text-align:right" class="mut">${grupos[k].n}</td></tr>`).join("")
+    ||`<tr><td colspan="3" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th>Concepto</th><th>Total ARS</th><th>Asientos</th></tr></thead><tbody>${rowsHtml}<tr class="result"><td>TOTAL</td><td style="text-align:right"><b>${fmt(total)}</b></td><td style="text-align:right">${txs.length}</td></tr></tbody>`;
+  document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto según la regla que definimos para esta cuenta.`;
 }
 window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
 // Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
@@ -1303,15 +1366,16 @@ async function guardarTodoEnSupabase(){
     guardarClave('CMV_AVISOS',CMV_AVISOS),
     guardarClave('HIST_LOCK',HIST_LOCK),
     guardarClave('TC_COMPROBANTE_OVERRIDE',TC_COMPROBANTE_OVERRIDE),
+    guardarClave('APERTURA_DETALLE',APERTURA_DETALLE),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
     cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
-    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE')
+    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -1326,6 +1390,7 @@ async function cargarTodoDesdeSupabase(){
   if(cav){ CMV_AVISOS=cav; hubo=true; }
   if(hl){ Object.assign(HIST_LOCK,hl); hubo=true; }
   if(tco&&Object.keys(tco).length){ Object.keys(TC_COMPROBANTE_OVERRIDE).forEach(k=>delete TC_COMPROBANTE_OVERRIDE[k]); Object.assign(TC_COMPROBANTE_OVERRIDE,tco); hubo=true; }
+  if(apd){ Object.assign(APERTURA_DETALLE,apd); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -1598,10 +1663,15 @@ function mergeEERRIntoData(res){
    (columna "Cuenta") en vez de por el grupo entero -- es el detalle que necesita cada l\u00EDnea de
    CONFIG_PTO. Antes CONFIG_PTO.serie quedaba fijo para siempre (se hab\u00EDa cargado una sola vez a
    mano); ahora se actualiza mes a mes con cada informe, igual que el resto de la app. */
+/* Apertura de Estructura: cuentas para las que ADEMAS del total mensual guardamos el detalle
+   transaccion por transaccion (para poder ver de que se compone, ej. que proveedores). Se agrega
+   de a una cuenta por vez, a pedido de Micaela -- ver CLASIF_APERTURA_FN mas abajo para la regla
+   de cada una. Acotado a proposito (no todas las ~100 cuentas de Estructura) para no guardar de mas. */
+const APERTURA_CUENTAS=["Alquileres"];
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
-  const cagg={}; const mesesSet=new Set();
+  const cagg={}; const mesesSet=new Set(); const detalle={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<10) continue;
     const origen=S(r[0]), tipoAux=S(r[1]), grupo=S(r[3]), cuenta=S(r[9]);
@@ -1617,11 +1687,37 @@ function parseRawLedgerCuentas(rows){
     if(!cagg[k]) cagg[k]={};
     if(!cagg[k][y]) cagg[k][y]=[0,0,0,0];
     const a=cagg[k][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
+    if(APERTURA_CUENTAS.includes(cuenta)){
+      if(!detalle[cuenta]) detalle[cuenta]=[];
+      detalle[cuenta].push({mes:y,fecha:dstr,origen,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,ars:Math.round(ars*100)/100});
+    }
   }
   const out={};
   Object.keys(cagg).forEach(k=>{ const serie={}; Object.keys(cagg[k]).sort().forEach(y=>serie[y]=cagg[k][y].map(v=>Math.round(v*1e4)/1e4)); out[k]=serie; });
-  return {cuentas:out, meses:[...mesesSet].sort()}; // cuentas: "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
+  return {cuentas:out, meses:[...mesesSet].sort(), detalle}; // cuentas: "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
 }
+const APERTURA_DETALLE={}; // cuenta -> [ {mes,fecha,origen,tipoComp,razonSocial,comprobante,ars}, ... ]
+function mergeAperturaIntoData(resCuentas){
+  // Mismo criterio de siempre: el archivo reemplaza los meses NO bloqueados que cubre; los meses
+  // bloqueados por HIST_LOCK se conservan tal cual, vengan o no en el archivo nuevo.
+  APERTURA_CUENTAS.forEach(cuenta=>{
+    const viejo=(APERTURA_DETALLE[cuenta]||[]).filter(t=>mesBloqueado(t.mes));
+    const nuevo=(resCuentas.detalle[cuenta]||[]).filter(t=>!mesBloqueado(t.mes));
+    APERTURA_DETALLE[cuenta]=[...viejo,...nuevo];
+  });
+}
+/* Reglas de clasificacion de "Apertura de Estructura": una funcion por cuenta que recibe una
+   transaccion (de APERTURA_DETALLE) y devuelve el "Concepto" bajo el que se agrupa en la pantalla.
+   Se define codigo por codigo -- avisame para cada cuenta nueva como clasificarla y la agrego ac\u00E1.
+   Supuesto a confirmar con Micaela: "viene de tesorer\u00EDa" = Origen "ContaParam" (carga manual de
+   contabilidad/tesorer\u00EDa, a diferencia de "Compras" que es autom\u00E1tica desde el circuito de compras). */
+const CLASIF_APERTURA_FN={
+  "Alquileres": t=>{
+    if(t.origen==="Compras") return t.razonSocial||"(sin proveedor)";
+    if(t.origen==="ContaParam" && /EXP/i.test(t.tipoComp)) return "Expensas Of. CABA";
+    return "Otros";
+  }
+};
 function mergePtoRealIntoConfig(resCuentas){
   // Misma logica que mergeEERRIntoData: el archivo reemplaza (no mezcla) los meses no bloqueados
   // que cubre -- si una cuenta no tiene movimientos ese mes en el archivo nuevo, queda en 0 (no se
@@ -2189,6 +2285,7 @@ async function onCargarInformeCrudo(file){
     mergeEERRIntoData(res);
     const resCuentas=parseRawLedgerCuentas(rows);
     const nCuentas=mergePtoRealIntoConfig(resCuentas);
+    mergeAperturaIntoData(resCuentas);
     const resC=parseRawLedgerCMV(rows);
     aplicarCMVDesdeCrudo(resC);
     msgEl.textContent="Guardando en Supabase...";
@@ -2320,6 +2417,7 @@ async function onCargarInformeCrudo(file){
   initEerrUI();
   initPto();
   initPtoHist();
+  initPtoApertura();
   initCMV();
   try{initProy();}catch(e){console.warn("proy:",e);}
 })();
