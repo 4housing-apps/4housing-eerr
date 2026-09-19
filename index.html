@@ -784,15 +784,28 @@ function renderPtoApertura(){
     const down=idx<conceptos.length-1?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
     return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
   }).join("") || `<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
-  const totCells=colTot.map(v=>`<td class="mescol" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
-  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
+  // Pto de la cuenta (pesos), mes a mes, para comparar contra el real de esta apertura -- misma
+  // logica que Presupuesto·Estructura (vigencias + prorrateo /12 si la cuenta es anual).
+  const ovCuenta=OVERRIDES[cuenta];
+  const baseCuenta=ovCuenta?ovCuenta.base:"mensual";
+  const ptoMesFn=m=>{ const v=ptoEnMes(cuenta,m,1); return baseCuenta==="anual"?v/12:v; };
+  const ptoPorMes=mesesSel.map(ptoMesFn);
+  const ptoTotalPeriodo=ptoPorMes.reduce((s,v)=>s+v,0);
+  const totCells=colTot.map((v,i)=>{
+    const ptoM=ptoPorMes[i], cls=ptoM?(v>ptoM?" over":" under"):"";
+    return `<td class="mescol${cls}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`;
+  }).join("");
+  const totalArsCls=ptoTotalPeriodo?(total>ptoTotalPeriodo?" over":" under"):"";
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr${totalArsCls}" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
+  const ptoCells=ptoPorMes.map(v=>`<td class="mescol info" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
+  const ptoRow=`<tr><td class="fz fz1 info">Pto</td>${ptoCells}<td class="fzr info" style="text-align:right"><b>${fmt(ptoTotalPeriodo)}</b></td><td class="fzr info"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("paTabla").className="grid";
-  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto y mes según la regla que definimos para esta cuenta.`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" es el presupuesto mensual de la cuenta (mismo dato de Presupuesto·Estructura); el TOTAL se marca en <span class="under">verde</span> si el real quedó por debajo, o en <span class="over">rojo</span> si lo superó.`;
 }
 window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
 // Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
