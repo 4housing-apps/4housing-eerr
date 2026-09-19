@@ -294,10 +294,13 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
     <div class="kpis" id="paKpis"></div>
     <div class="table-wrap"><table id="paTabla"></table></div>
     <div class="foot" id="paFoot"></div>
+    <div class="table-wrap" id="paPtoWrap" style="display:none;margin-top:18px"><table id="paPtoTabla"></table></div>
+    <div class="foot" id="paPtoFoot"></div>
   </div>
   <div id="ptoSubHist" style="display:none">
     <div class="controls">
       <div class="ctl"><label for="phCuenta">Cuenta</label><select id="phCuenta"></select></div>
+      <div class="ctl" id="phConceptoWrap" style="display:none"><label for="phConcepto">Concepto</label><select id="phConcepto"></select></div>
       <div class="ctl"><label for="phMes">Desde</label><select id="phMes"></select></div>
       <div class="ctl"><label for="phPto">Nuevo Pto ($, en pesos de ese mes)</label><input id="phPto" type="text" inputmode="numeric" placeholder="0" style="width:150px"></div>
       <div class="ctl"><label>&nbsp;</label><button class="btn" id="phAddBtn">Agregar vigencia</button></div>
@@ -718,18 +721,54 @@ function initPtoHist(){
   CONFIG_PTO.slice().sort((a,b)=>a.cuenta<b.cuenta?-1:1).forEach(c=>sel.add(new Option(c.cuenta,c.key)));
   const mesSel=document.getElementById("phMes");
   mesSel.innerHTML="";mesesConFuturo(12).forEach(m=>mesSel.add(new Option(mesLabel(m),m)));
-  sel.addEventListener("change",renderPtoHist);
+  // Si la cuenta elegida tiene Apertura de Estructura (ej. Alquileres), se puede elegir ademas un
+  // Concepto puntual (ej. PRINCI) para darle su propia vigencia, en vez de la de toda la cuenta.
+  const conceptoWrap=document.getElementById("phConceptoWrap"), conceptoSel=document.getElementById("phConcepto");
+  function actualizarConceptoSel(){
+    const conceptos=conceptosDeApertura(cuentaNombrePorKey(sel.value));
+    if(!conceptos.length){ conceptoWrap.style.display="none"; conceptoSel.innerHTML=""; return; }
+    conceptoWrap.style.display="";
+    const actual=conceptoSel.value;
+    conceptoSel.innerHTML='<option value="">(Pto de la cuenta completa)</option>';
+    conceptos.forEach(k=>conceptoSel.add(new Option(k,k)));
+    if(conceptos.includes(actual)) conceptoSel.value=actual;
+  }
+  sel.addEventListener("change",()=>{actualizarConceptoSel();renderPtoHist();});
+  actualizarConceptoSel();
   document.getElementById("phAddBtn").addEventListener("click",()=>{
     if(!editable){alert('Desbloqueá la edición en Presupuesto·Estructura primero (botón "Desbloquear (Gerencia)").');return;}
     const key=sel.value; if(!key){alert("Elegí una cuenta.");return;}
     const desde=mesSel.value;
     const ptoInp=document.getElementById("phPto");
     const pto=parseFloat(String(ptoInp.value).replace(/\./g,"").replace(/,/g,"."))||0;
-    agregarVigencia(key,desde,pto);
+    const concepto=conceptoSel.value;
+    if(concepto) agregarVigenciaApertura(cuentaNombrePorKey(key),concepto,desde,pto);
+    else agregarVigencia(key,desde,pto);
     ptoInp.value="";
     renderPtoHist();
+    if(concepto) renderPtoApertura();
   });
 }
+function cuentaNombrePorKey(key){ const c=CONFIG_PTO.find(x=>x.key===key); return c?c.cuenta:key; }
+// Los "Concepto" de una cuenta con Apertura de Estructura: los que ya tienen transacciones
+// clasificadas, mas los que ya tengan un Pto cargado aunque ya no tengan movimientos (ej. el
+// alquiler que se da de baja por la compra del terreno, pero cuyo historial de vigencias sigue
+// siendo util ver).
+function conceptosDeApertura(cuenta){
+  const clasFn=CLASIF_APERTURA_FN[cuenta]; if(!clasFn) return [];
+  const set=new Set();
+  (APERTURA_DETALLE[cuenta]||[]).forEach(t=>set.add(clasFn(t)||"Otros"));
+  Object.keys(APERTURA_PTO[cuenta]||{}).forEach(k=>set.add(k));
+  return [...set].sort();
+}
+function eliminarVigenciaApertura(cuenta,concepto,desde){
+  const h=((APERTURA_PTO[cuenta]||{})[concepto]||{}).historial; if(!h) return;
+  const i=h.findIndex(e=>e.desde===desde); if(i<0) return;
+  if(!confirm(`¿Eliminar la vigencia desde ${mesLabel(desde)} de "${concepto}" (${cuenta})? Esto no se puede deshacer.`)) return;
+  h.splice(i,1);
+  saveAperturaPto();renderPtoHist();renderPtoApertura();
+}
+window.eliminarVigenciaApertura=eliminarVigenciaApertura;
 function renderPtoHist(){
   const sel=document.getElementById("phCuenta"); if(!sel) return;
   const filtroKey=sel.value;
@@ -740,16 +779,31 @@ function renderPtoHist(){
     if(key==="__cfg__") return;
     if(filtroKey&&key!==filtroKey) return;
     const h=OVERRIDES[key].historial||[]; const c=cuentasPorKey[key];
-    h.forEach(e=>filas.push({key,cuenta:c?c.cuenta:key,responsable:c?c.responsable:"",desde:e.desde,pto:e.pto}));
+    h.forEach(e=>filas.push({key,cuenta:c?c.cuenta:key,concepto:"",responsable:c?c.responsable:"",desde:e.desde,pto:e.pto}));
+  });
+  // Vigencias por concepto de Apertura de Estructura (ej. Alquileres·PRINCI) -- se muestran en la
+  // misma lista, filtradas por la cuenta elegida arriba (si hay alguna elegida).
+  const cuentaFiltro=filtroKey?cuentaNombrePorKey(filtroKey):"";
+  Object.keys(APERTURA_PTO).forEach(cuenta=>{
+    if(filtroKey&&cuenta!==cuentaFiltro) return;
+    Object.keys(APERTURA_PTO[cuenta]).forEach(concepto=>{
+      const h=APERTURA_PTO[cuenta][concepto].historial||[];
+      h.forEach(e=>filas.push({key:null,cuenta,concepto,responsable:"",desde:e.desde,pto:e.pto}));
+    });
   });
   filas.sort((a,b)=>b.desde<a.desde?-1:(b.desde>a.desde?1:(a.cuenta<b.cuenta?-1:1)));
-  const rowsHtml=filas.map(f=>`<tr>
-      <td class="ell" style="max-width:220px" title="${esc(f.cuenta)}">${esc(f.cuenta)}</td>
+  const rowsHtml=filas.map(f=>{
+    const btn=!editable?"":(f.concepto
+      ?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="eliminarVigenciaApertura('${esc(f.cuenta).replace(/'/g,"\\'")}','${esc(f.concepto).replace(/'/g,"\\'")}','${f.desde}')">Eliminar</button>`
+      :`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="eliminarVigencia('${esc(f.key).replace(/'/g,"\\'")}','${f.desde}')">Eliminar</button>`);
+    return `<tr>
+      <td class="ell" style="max-width:260px" title="${esc(f.cuenta)}${f.concepto?" · "+esc(f.concepto):""}">${esc(f.cuenta)}${f.concepto?` <span class="mut">· ${esc(f.concepto)}</span>`:""}</td>
       <td class="mut">${esc(iniciales(f.responsable))}</td>
       <td>${esc(mesLabel(f.desde))}</td>
       <td style="text-align:right">${fmt(f.pto)}</td>
-      <td>${editable?`<button class="btn" style="padding:3px 9px;font-size:11px" onclick="eliminarVigencia('${esc(f.key).replace(/'/g,"\\'")}','${f.desde}')">Eliminar</button>`:""}</td>
-    </tr>`).join("")||`<tr><td colspan="5" class="mut" style="padding:16px">Sin cambios de Pto registrados todavía${filtroKey?" para esta cuenta":""}.</td></tr>`;
+      <td>${btn}</td>
+    </tr>`;
+  }).join("")||`<tr><td colspan="5" class="mut" style="padding:16px">Sin cambios de Pto registrados todavía${filtroKey?" para esta cuenta":""}.</td></tr>`;
   document.getElementById("phTabla").innerHTML=`<thead><tr><th>Cuenta</th><th>Resp.</th><th>Desde</th><th>Pto</th><th></th></tr></thead><tbody>${rowsHtml}</tbody>`;
 }
 /* ===== Apertura de Estructura: desglose transaccion por transaccion de una cuenta, agrupado por
@@ -808,6 +862,8 @@ function renderPtoApertura(){
     document.getElementById("paKpis").innerHTML="";
     document.getElementById("paTabla").innerHTML="";
     document.getElementById("paFoot").innerHTML=`Todavía no definimos cómo clasificar "${esc(cuenta)}". Contame qué información querés ver acá (ej. como con Alquileres) y la agrego.`;
+    document.getElementById("paPtoWrap").style.display="none";
+    document.getElementById("paPtoFoot").innerHTML="";
     return;
   }
   const grupos={};
@@ -827,11 +883,22 @@ function renderPtoApertura(){
     const down=idx<conceptos.length-1?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
     return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
   }).join("") || `<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
-  // Pto de la cuenta (pesos), mes a mes, para comparar contra el real de esta apertura -- misma
-  // logica que Presupuesto·Estructura (vigencias + prorrateo /12 si la cuenta es anual).
+  // Pto de la cuenta mes a mes, para comparar contra el real de esta apertura. Si hay Pto cargado
+  // por concepto (APERTURA_PTO, ver mas abajo) se usa la suma de esos -- asi cada proveedor puede
+  // tener su propia vigencia (ej. el alquiler que se da de baja en julio por la compra del terreno).
+  // Si un concepto todavia no tiene Pto propio cargado (ej. "Otros"), no suma nada -- no se inventa.
+  // OJO: la lista de conceptos con Pto propio (ptoConceptos) es independiente de "conceptos" (que
+  // sale de las transacciones reales del período elegido) -- asi un concepto que se dio de baja
+  // (ej. PRINCI a partir de julio, por la compra del terreno) sigue sumando su Pto (0 desde esa
+  // vigencia) aunque ya no tenga movimientos en el rango visible.
+  const ptoConceptos=Object.keys(APERTURA_PTO[cuenta]||{});
+  const tienePtoPorConcepto=!!ptoConceptos.length;
   const ovCuenta=OVERRIDES[cuenta];
   const baseCuenta=ovCuenta?ovCuenta.base:"mensual";
-  const ptoMesFn=m=>{ const v=ptoEnMes(cuenta,m,1); return baseCuenta==="anual"?v/12:v; };
+  const ptoMesFn=m=>{
+    if(tienePtoPorConcepto) return ptoConceptos.reduce((s,k)=>s+aperturaPtoEnMes(cuenta,k,m),0);
+    const v=ptoEnMes(cuenta,m,1); return baseCuenta==="anual"?v/12:v;
+  };
   const ptoPorMes=mesesSel.map(ptoMesFn);
   const totCells=colTot.map((v,i)=>{
     const ptoM=ptoPorMes[i], cls=ptoM?(v>ptoM?" over":" under"):"";
@@ -850,13 +917,51 @@ function renderPtoApertura(){
   const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
   const ptoCells=ptoPorMes.map(v=>`<td class="mescol info" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
   const ptoRow=`<tr><td class="fz fz1 info">Pto</td>${ptoCells}<td class="fzr info${totalArsCls}" style="text-align:right" title="Desvío acumulado desde ${esc(mesLabel(fechaBaseYM))}"><b>${fmt(desvioAcum)}</b></td><td class="fzr info"></td></tr>`;
+  // Fila "Desvío": real - Pto, mes a mes (a diferencia del Total de la fila Pto, que es acumulado
+  // desde la fecha base). Verde si viene por debajo del Pto, rojo si lo supera.
+  const desvioCells=colTot.map((v,i)=>{
+    const d=v-ptoPorMes[i], cls=d?(d>0?" over":" under"):"";
+    return `<td class="mescol info${cls}" style="text-align:right">${ptoPorMes[i]||v?fmt(d):"–"}</td>`;
+  }).join("");
+  const desvioRow=`<tr><td class="fz fz1 info">Desvío</td>${desvioCells}<td class="fzr info${totalArsCls}" style="text-align:right"><b>${fmt(desvioAcum)}</b></td><td class="fzr info"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("paTabla").className="grid";
-  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}</tbody>`;
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual de la cuenta (mismo dato de Presupuesto·Estructura) y, en la columna Total, el desvío acumulado desde ${esc(mesLabel(fechaBaseYM))} (no depende del filtro "Desde" de arriba) — en <span class="under">verde</span> si viene por debajo del Pto, en <span class="over">rojo</span> si lo supera.`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados) y la fila "Desvío" la diferencia real − Pto de cada mes — en <span class="under">verde</span> por debajo del Pto, en <span class="over">rojo</span> por encima; la columna Total de ambas es el desvío acumulado desde ${esc(mesLabel(fechaBaseYM))} (no depende del filtro "Desde" de arriba).`;
+  renderPtoAperturaPorConcepto(cuenta,mesesSel);
+}
+// Segunda tabla: Pto de CADA concepto mes a mes (no el real) -- muestra como se compone el Pto
+// agregado de arriba, con la escalada por inflación de cada vigencia (misma lógica que Presupuesto).
+// Usa los conceptos que tienen Pto cargado (APERTURA_PTO), no los de la tabla de arriba -- para que
+// un concepto dado de baja (sin transacciones en el rango visible) siga mostrando su fila.
+function renderPtoAperturaPorConcepto(cuenta,mesesSel){
+  const wrap=document.getElementById("paPtoWrap"), tabla=document.getElementById("paPtoTabla"), foot=document.getElementById("paPtoFoot");
+  const ptoKeys=Object.keys(APERTURA_PTO[cuenta]||{});
+  // Mismo orden manual que la tabla de arriba (APERTURA_ORDEN), para que las dos tablas se lean
+  // consistentes; los conceptos con Pto que todavia no entraron en ese orden van al final.
+  const ordenGuardado=(APERTURA_ORDEN[cuenta]||[]).filter(k=>ptoKeys.includes(k));
+  const resto=ptoKeys.filter(k=>!ordenGuardado.includes(k)).sort();
+  const conConceptoPto=[...ordenGuardado,...resto];
+  if(!conConceptoPto.length || !mesesSel.length){ wrap.style.display="none"; foot.innerHTML=""; return; }
+  wrap.style.display="";
+  const colTot=mesesSel.map(()=>0);
+  const rowsHtml=conConceptoPto.map(k=>{
+    const cells=mesesSel.map((m,i)=>{ const v=aperturaPtoEnMes(cuenta,k,m); colTot[i]+=v; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    const totalK=mesesSel.reduce((s,m)=>s+aperturaPtoEnMes(cuenta,k,m),0);
+    return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(totalK)}</b></td></tr>`;
+  }).join("");
+  const totCells=colTot.map(v=>`<td class="mescol" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
+  const totalGral=colTot.reduce((s,v)=>s+v,0);
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(totalGral)}</b></td></tr>`;
+  const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
+  tabla.className="grid";
+  tabla.innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Pto por concepto</th>${monthHdr}<th class="fzr" style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
+  colResizeInit(tabla);
+  requestAnimationFrame(()=>{ actualizarStickyPto("paPtoTabla"); actualizarStickyPtoDerecha("paPtoTabla"); });
+  foot.innerHTML=`Presupuesto de cada concepto de "${esc(cuenta)}", mes a mes, ajustado por inflación desde el mes de cada vigencia (mismo criterio que Presupuesto·Estructura). Se administra por Historial de cambios; avisame los valores y las fechas de vigencia y los cargo.`;
 }
 window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
 // Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
@@ -1457,15 +1562,16 @@ async function guardarTodoEnSupabase(){
     guardarClave('TC_COMPROBANTE_OVERRIDE',TC_COMPROBANTE_OVERRIDE),
     guardarClave('APERTURA_DETALLE',APERTURA_DETALLE),
     guardarClave('APERTURA_ORDEN',APERTURA_ORDEN),
+    guardarClave('APERTURA_PTO',APERTURA_PTO),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo,appto]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
     cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
-    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE'),cargarClave('APERTURA_ORDEN')
+    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE'),cargarClave('APERTURA_ORDEN'),cargarClave('APERTURA_PTO')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -1482,6 +1588,7 @@ async function cargarTodoDesdeSupabase(){
   if(tco&&Object.keys(tco).length){ Object.keys(TC_COMPROBANTE_OVERRIDE).forEach(k=>delete TC_COMPROBANTE_OVERRIDE[k]); Object.assign(TC_COMPROBANTE_OVERRIDE,tco); hubo=true; }
   if(apd){ Object.assign(APERTURA_DETALLE,apd); hubo=true; }
   if(apo){ Object.assign(APERTURA_ORDEN,apo); hubo=true; }
+  if(appto){ Object.assign(APERTURA_PTO,appto); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -1838,6 +1945,74 @@ const CLASIF_APERTURA_FN={
     return "Otros";
   }
 };
+/* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
+   de la apertura (ej. cada proveedor de Alquileres) tiene su propia vigencia -- necesario para casos
+   como "a partir de julio se compra el terreno y ese alquiler puntual deja de existir" sin tocar el
+   Pto de los demas conceptos de la misma cuenta. Misma logica de vigencias que OVERRIDES (pesosEnMes
+   para reexpresar el monto declarado en el mes de esa vigencia a pesos de cualquier otro mes). */
+const APERTURA_PTO={}; // cuenta -> concepto -> {historial:[{desde,pto}, ...]}
+// Semilla de Abril/2026 para Alquileres, provista por Micaela. Se aplica una sola vez -- igual que
+// loadOverrides(), nunca pisa un valor que ya este cargado (a mano o desde Supabase).
+// El "0" de PRINCI desde julio no me lo pasaste como numero -- lo deduje de tu propia planilla: el
+// total de jul/ago que pusiste ($9.756.262,77) es exactamente igual a SPWORK+BERGER+Expensas solas,
+// ajustadas por inflacion desde abril, sin nada de PRINCI. Si en realidad no es cero (ej. te queda
+// algun saldo o cargo residual), avisame el valor real y lo corrijo en Historial de cambios.
+const APERTURA_PTO_SEED={
+  "Alquileres":{
+    "PRINCI":[{desde:"2026-04",pto:9000000},{desde:"2026-07",pto:0}],
+    "SPWORK":[{desde:"2026-04",pto:7050000}],
+    "BERGER":[{desde:"2026-04",pto:1400000}],
+    "Expensas Of. CABA":[{desde:"2026-04",pto:730000}]
+  }
+};
+function loadAperturaPtoSeed(){
+  let hubo=false;
+  Object.keys(APERTURA_PTO_SEED).forEach(cuenta=>{
+    Object.keys(APERTURA_PTO_SEED[cuenta]).forEach(concepto=>{
+      if(!APERTURA_PTO[cuenta]) APERTURA_PTO[cuenta]={};
+      if(!APERTURA_PTO[cuenta][concepto]){
+        APERTURA_PTO[cuenta][concepto]={historial:APERTURA_PTO_SEED[cuenta][concepto].map(e=>({...e}))};
+        hubo=true;
+      }
+    });
+  });
+  return hubo;
+}
+async function saveAperturaPto(){ guardarClave('APERTURA_PTO',APERTURA_PTO); }
+// El "Concepto" que arma CLASIF_APERTURA_FN sale de la Razon Social tal cual figura en el crudo
+// (ej. podria venir "PRINCI SRL" en vez de "PRINCI"). Para no depender de que coincida caracter a
+// caracter con la clave que carguemos en APERTURA_PTO, matchea por igualdad exacta primero y, si no
+// hay, por contencion (sin mayusc/minusc) en cualquiera de los dos sentidos.
+function normApertura(s){ return (s||"").toUpperCase().trim(); }
+function aperturaPtoKeyFor(cuenta,concepto){
+  const map=APERTURA_PTO[cuenta]; if(!map) return null;
+  if(map[concepto]) return concepto;
+  const nc=normApertura(concepto);
+  return Object.keys(map).find(k=>{ const nk=normApertura(k); return nc===nk||nc.startsWith(nk)||nk.startsWith(nc); })||null;
+}
+function aperturaPtoVigente(cuenta,concepto,ym){
+  const key=aperturaPtoKeyFor(cuenta,concepto); if(!key) return null;
+  const h=APERTURA_PTO[cuenta][key].historial;
+  if(!h||!h.length) return null;
+  let elegido=h[0];
+  for(const e of h){ if(e.desde<=ym) elegido=e; else break; }
+  return elegido;
+}
+function aperturaPtoEnMes(cuenta,concepto,ym){
+  const v=aperturaPtoVigente(cuenta,concepto,ym);
+  if(!v) return 0;
+  return pesosEnMes(v.pto,v.desde,ym);
+}
+function agregarVigenciaApertura(cuenta,concepto,desde,pto){
+  if(!APERTURA_PTO[cuenta]) APERTURA_PTO[cuenta]={};
+  if(!APERTURA_PTO[cuenta][concepto]) APERTURA_PTO[cuenta][concepto]={historial:[]};
+  const h=APERTURA_PTO[cuenta][concepto].historial;
+  const i=h.findIndex(e=>e.desde===desde);
+  if(i>=0) h[i]={desde,pto}; else h.push({desde,pto});
+  h.sort((a,b)=>a.desde<b.desde?-1:1);
+  saveAperturaPto();
+}
+window.agregarVigenciaApertura=agregarVigenciaApertura;
 function mergePtoRealIntoConfig(resCuentas){
   // Misma logica que mergeEERRIntoData: el archivo reemplaza (no mezcla) los meses no bloqueados
   // que cubre -- si una cuenta no tiene movimientos ese mes en el archivo nuevo, queda en 0 (no se
@@ -2535,6 +2710,7 @@ async function onCargarInformeCrudo(file){
   const ok=await initAuth();
   if(!ok) return; // pantalla de login ya mostrada
   await cargarTodoDesdeSupabase();
+  if(loadAperturaPtoSeed()) saveAperturaPto();
   initEerrUI();
   initPto();
   initPtoHist();
