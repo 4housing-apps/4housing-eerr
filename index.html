@@ -1926,7 +1926,7 @@ function mergeEERRIntoData(res){
    (un espacio, mayus/minus) dejaba afuera del detalle transacciones reales sin ningun aviso -- ahora
    se admite cualquier grupo salvo el que se quiere excluir explicitamente, y el filtro "Grupo" de la
    pantalla (poblarGrupoApertura) se arma con los grupos que realmente aparecen en los datos. */
-const APERTURA_CUENTAS=["Alquileres"];
+const APERTURA_CUENTAS=["Alquileres","Ajustes Cuentas Corrientes"];
 const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
@@ -2000,7 +2000,10 @@ const CLASIF_APERTURA_FN={
     if(t.origen==="Compras") return t.razonSocial||"(sin proveedor)";
     if(t.origen==="Tesoreria" && /EXP/i.test(t.tipoComp)) return "Expensas Of. CABA";
     return "Otros";
-  }
+  },
+  // A pedido de Micaela: acá el "Concepto" es directamente el módulo de Tango donde se originó el
+  // movimiento (Compras, Ventas, ContaParam, Tesorería, etc.), no el proveedor ni ninguna otra regla.
+  "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)"
 };
 /* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
    de la apertura (ej. cada proveedor de Alquileres) tiene su propia vigencia -- necesario para casos
