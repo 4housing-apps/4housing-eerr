@@ -108,20 +108,23 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
 .mut{color:var(--muted);font-size:10px;}
 @media(max-width:880px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}.grid3{grid-template-columns:1fr}}
 
-#pTabla{border-collapse:separate;border-spacing:0;}
-#pTabla th,#pTabla td{background:var(--card);}
-#pTabla thead th{position:sticky;top:0;z-index:5;background:#EDEBE1;}
-#pTabla td.fz,#pTabla th.fz{position:sticky;}
-#pTabla tbody td.fz{z-index:2;background:var(--card);}
-#pTabla thead th.fz{z-index:6;}
-#pTabla tr.result td.fz{background:#EDEBE1;}
-/* Igual que .fz pero fijas del lado DERECHO (Total real / Desvío / Acumulado) -- para que "Cuenta"
-   hasta "Pto/mes" y "Total real" hasta "Acumulado" queden siempre visibles en los dos extremos,
-   dejando los meses del medio como la única franja que se desplaza horizontalmente. */
-#pTabla td.fzr,#pTabla th.fzr{position:sticky;}
-#pTabla tbody td.fzr{z-index:2;background:var(--card);}
-#pTabla thead th.fzr{z-index:6;}
-#pTabla tr.result td.fzr{background:#EDEBE1;}
+/* Reglas genericas para cualquier tabla "table.grid" con columnas fijas (sticky) -- antes estaban
+   escritas solo para #pTabla (Presupuesto), ahora aplican tambien a #paTabla (Apertura de
+   Estructura) y a cualquier otra que se agregue despues con el mismo patron. */
+table.grid{border-collapse:separate;border-spacing:0;}
+table.grid th,table.grid td{background:var(--card);}
+table.grid thead th{position:sticky;top:0;z-index:5;background:#EDEBE1;}
+table.grid td.fz,table.grid th.fz{position:sticky;}
+table.grid tbody td.fz{z-index:2;background:var(--card);}
+table.grid thead th.fz{z-index:6;}
+table.grid tr.result td.fz{background:#EDEBE1;}
+/* Igual que .fz pero fijas del lado DERECHO (ej. Total real / Desvío / Acumulado en Presupuesto,
+   Total ARS / Asientos en Apertura) -- para que las columnas clave queden siempre visibles en los
+   dos extremos, dejando los meses del medio como la única franja que se desplaza horizontalmente. */
+table.grid td.fzr,table.grid th.fzr{position:sticky;}
+table.grid tbody td.fzr{z-index:2;background:var(--card);}
+table.grid thead th.fzr{z-index:6;}
+table.grid tr.result td.fzr{background:#EDEBE1;}
 /* El "left"/"right" de las columnas fijas (fz/fzr) ya no es un valor fijo por CSS -- se recalcula
    en JS (actualizarStickyPto/actualizarStickyPtoDerecha) segun el ancho real de cada columna,
    porque se pueden redimensionar a mano y Base/Pto Pesos/Pto-mes se pueden ocultar. Ver esas funciones. */
@@ -135,13 +138,13 @@ td.over,.over{color:var(--cost);font-weight:700;}td.under,.under{color:var(--inc
 .mescol{min-width:70px;max-width:90px;}
 /* Los encabezados largos ("Acum. desde ..." etc.) pasan a dos líneas en vez de recortarse o
    superponerse con la columna de al lado cuando la columna es angosta. */
-#pTabla thead th{white-space:normal;line-height:1.25;}
+table.grid thead th{white-space:normal;line-height:1.25;}
 /* Distinción visual entre columnas de gasto real (fondo plano) y columnas de info/cálculo
    (Pto, desvíos, acumulado, etc. -- fondo tenue para que se note de un vistazo cuál es cuál). */
-#pTabla td.info,#pTabla th.info{background:#F7F1E4;}
-#pTabla tbody td.info{background:#F7F1E4;}
-#pTabla tr.result td.info{background:#EFE6D0;}
-#pTabla td.real,#pTabla th.real{background:var(--card);}
+table.grid td.info,table.grid th.info{background:#F7F1E4;}
+table.grid tbody td.info{background:#F7F1E4;}
+table.grid tr.result td.info{background:#EFE6D0;}
+table.grid td.real,table.grid th.real{background:var(--card);}
 /* Columnas redimendisonables: tirador en el borde derecho del encabezado. */
 table.grid{position:relative;}
 table.grid th{position:relative;}
@@ -153,7 +156,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
 .btn{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;}
 .btn:hover{background:#fff;}
 @page{size:landscape;margin:8mm;}
-@media print{.sidebar,.tabs,.controls,.bar,.badge,nav,header.top{display:none!important;}.table-wrap{overflow:visible!important;border:none;}#pTabla th,#pTabla td{position:static!important;}#pTabla{font-size:8px;}#pTabla thead{display:table-header-group;}tr{break-inside:avoid;}body{zoom:.78;-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;}}
+@media print{.sidebar,.tabs,.controls,.bar,.badge,nav,header.top{display:none!important;}.table-wrap{overflow:visible!important;border:none;}table.grid th,table.grid td{position:static!important;}#pTabla{font-size:8px;}table.grid thead{display:table-header-group;}tr{break-inside:avoid;}body{zoom:.78;-webkit-print-color-adjust:exact;print-color-adjust:exact;display:block;}}
 .pto-wrap{max-height:72vh;}
 @media print{.pto-wrap{max-height:none;}}
 #tabla thead th{position:sticky;top:0;z-index:5;background:#EDEBE1;box-shadow:inset 0 -1px 0 var(--line);}
@@ -771,17 +774,23 @@ function renderPtoApertura(){
     grupos[concepto].ars+=t.ars;grupos[concepto].n++;
     grupos[concepto].porMes[t.mes]=(grupos[concepto].porMes[t.mes]||0)+t.ars;
   });
-  const conceptos=Object.keys(grupos).sort((x,y)=>grupos[y].ars-grupos[x].ars);
+  const conceptos=resolverOrdenApertura(cuenta,grupos);
   const total=conceptos.reduce((s,k)=>s+grupos[k].ars,0);
   const colTot=mesesSel.map(()=>0);
-  const rowsHtml=conceptos.map(k=>{
-    const cells=mesesSel.map((m,i)=>{ const v=grupos[k].porMes[m]||0; colTot[i]+=v; return `<td style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-    return `<tr><td class="ell" style="max-width:200px" title="${esc(k)}">${esc(k)}</td>${cells}<td style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td style="text-align:right" class="mut">${grupos[k].n}</td></tr>`;
+  const rowsHtml=conceptos.map((k,idx)=>{
+    const cells=mesesSel.map((m,i)=>{ const v=grupos[k].porMes[m]||0; colTot[i]+=v; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    const kEsc=esc(k).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
+    const up=idx>0?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',-1)" title="Subir" style="cursor:pointer;padding:0 2px">▲</span>`:`<span style="opacity:.2;padding:0 2px">▲</span>`;
+    const down=idx<conceptos.length-1?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
+    return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
   }).join("") || `<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
-  const totCells=colTot.map(v=>`<td style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
-  const totalRow=`<tr class="result"><td>TOTAL</td>${totCells}<td style="text-align:right"><b>${fmt(total)}</b></td><td style="text-align:right">${txs.length}</td></tr>`;
-  const monthHdr=mesesSel.map(m=>`<th>${mesLabel(m)}</th>`).join("");
-  document.getElementById("paTabla").innerHTML=`<thead><tr><th style="text-align:left">Concepto</th>${monthHdr}<th>Total ARS</th><th>Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
+  const totCells=colTot.map(v=>`<td class="mescol" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
+  const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
+  document.getElementById("paTabla").className="grid";
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
+  colResizeInit(document.getElementById("paTabla"));
+  requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
   document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto y mes según la regla que definimos para esta cuenta.`;
 }
@@ -860,36 +869,40 @@ function ptoTh(label,col,rows){
 // null = la tabla esta oculta (display:none en algun ancestro, ej. otra sub-pestaña o pestaña):
 // getBoundingClientRect().width daria 0 para todo y calcularia mal, asi que en ese caso no se toca
 // nada -- se vuelve a llamar cuando la tabla se hace visible (showPtoSub).
-function actualizarStickyPto(){
-  const table=document.getElementById("pTabla"); if(!table||table.offsetParent===null) return;
+function actualizarStickyPto(tableId){
+  tableId=tableId||"pTabla";
+  const table=document.getElementById(tableId); if(!table||table.offsetParent===null) return;
   const ths=[...table.querySelectorAll("thead th")];
   let acc=0,css="";
   for(let i=0;i<ths.length;i++){
     if(!ths[i].classList.contains("fz")) break;
-    css+=`#pTabla th:nth-child(${i+1}),#pTabla td:nth-child(${i+1}){left:${acc}px;}`;
+    css+=`#${tableId} th:nth-child(${i+1}),#${tableId} td:nth-child(${i+1}){left:${acc}px;}`;
     acc+=ths[i].getBoundingClientRect().width;
   }
-  let styleEl=document.getElementById("pTablaStickyCSS");
-  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id="pTablaStickyCSS"; document.head.appendChild(styleEl); }
+  const styleId=tableId+"StickyCSS";
+  let styleEl=document.getElementById(styleId);
+  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id=styleId; document.head.appendChild(styleEl); }
   styleEl.textContent=css;
 }
-function actualizarStickyPtoDerecha(){
-  const table=document.getElementById("pTabla"); if(!table||table.offsetParent===null) return;
+function actualizarStickyPtoDerecha(tableId){
+  tableId=tableId||"pTabla";
+  const table=document.getElementById(tableId); if(!table||table.offsetParent===null) return;
   const ths=[...table.querySelectorAll("thead th")];
   let acc=0,css="";
   for(let i=ths.length-1;i>=0;i--){
     if(!ths[i].classList.contains("fzr")) break;
-    css+=`#pTabla th:nth-child(${i+1}),#pTabla td:nth-child(${i+1}){right:${acc}px;}`;
+    css+=`#${tableId} th:nth-child(${i+1}),#${tableId} td:nth-child(${i+1}){right:${acc}px;}`;
     acc+=ths[i].getBoundingClientRect().width;
   }
-  let styleEl=document.getElementById("pTablaStickyDerechaCSS");
-  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id="pTablaStickyDerechaCSS"; document.head.appendChild(styleEl); }
+  const styleId=tableId+"StickyDerechaCSS";
+  let styleEl=document.getElementById(styleId);
+  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id=styleId; document.head.appendChild(styleEl); }
   styleEl.textContent=css;
 }
 window.addEventListener("resize",()=>{
-  if(document.getElementById("view-pto").style.display!=="none" && document.getElementById("ptoSubMain").style.display!=="none"){
-    actualizarStickyPto(); actualizarStickyPtoDerecha();
-  }
+  if(document.getElementById("view-pto").style.display==="none") return;
+  if(document.getElementById("ptoSubMain").style.display!=="none"){ actualizarStickyPto(); actualizarStickyPtoDerecha(); }
+  else if(document.getElementById("ptoSubApert").style.display!=="none"){ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); }
 });
 let pMostrarDetallePto=false; // Base/Pto Pesos/Pto-mes empiezan escondidos: son de consulta ocasional
                                // y ocupan lugar que se necesita para ver más meses de gasto real.
@@ -1379,15 +1392,16 @@ async function guardarTodoEnSupabase(){
     guardarClave('HIST_LOCK',HIST_LOCK),
     guardarClave('TC_COMPROBANTE_OVERRIDE',TC_COMPROBANTE_OVERRIDE),
     guardarClave('APERTURA_DETALLE',APERTURA_DETALLE),
+    guardarClave('APERTURA_ORDEN',APERTURA_ORDEN),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
     cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
-    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE')
+    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE'),cargarClave('APERTURA_ORDEN')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -1403,6 +1417,7 @@ async function cargarTodoDesdeSupabase(){
   if(hl){ Object.assign(HIST_LOCK,hl); hubo=true; }
   if(tco&&Object.keys(tco).length){ Object.keys(TC_COMPROBANTE_OVERRIDE).forEach(k=>delete TC_COMPROBANTE_OVERRIDE[k]); Object.assign(TC_COMPROBANTE_OVERRIDE,tco); hubo=true; }
   if(apd){ Object.assign(APERTURA_DETALLE,apd); hubo=true; }
+  if(apo){ Object.assign(APERTURA_ORDEN,apo); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -1723,6 +1738,27 @@ function mergeAperturaIntoData(resCuentas){
     APERTURA_DETALLE[cuenta]=[...viejo,...nuevo];
   });
 }
+// Orden manual de los "Concepto" de Apertura de Estructura, elegido a mano (flechas subir/bajar) --
+// cuenta -> [concepto, concepto, ...]. Los conceptos que todavia no se ordenaron a mano se agregan
+// al final, ordenados por importe descendente (comportamiento de antes).
+const APERTURA_ORDEN={};
+function resolverOrdenApertura(cuenta,grupos){
+  const guardado=(APERTURA_ORDEN[cuenta]||[]).filter(k=>grupos[k]);
+  const guardadoSet=new Set(guardado);
+  const resto=Object.keys(grupos).filter(k=>!guardadoSet.has(k)).sort((x,y)=>grupos[y].ars-grupos[x].ars);
+  const orden=[...guardado,...resto];
+  if(JSON.stringify(orden)!==JSON.stringify(APERTURA_ORDEN[cuenta]||[])){ APERTURA_ORDEN[cuenta]=orden; guardarClave('APERTURA_ORDEN',APERTURA_ORDEN); }
+  return orden;
+}
+function moverConceptoApertura(cuenta,concepto,dir){
+  const orden=APERTURA_ORDEN[cuenta]; if(!orden) return;
+  const i=orden.indexOf(concepto); if(i<0) return;
+  const j=i+dir; if(j<0||j>=orden.length) return;
+  [orden[i],orden[j]]=[orden[j],orden[i]];
+  guardarClave('APERTURA_ORDEN',APERTURA_ORDEN);
+  renderPtoApertura();
+}
+window.moverConceptoApertura=moverConceptoApertura;
 /* Reglas de clasificacion de "Apertura de Estructura": una funcion por cuenta que recibe una
    transaccion (de APERTURA_DETALLE) y devuelve el "Concepto" bajo el que se agrupa en la pantalla.
    Se define codigo por codigo -- avisame para cada cuenta nueva como clasificarla y la agrego ac\u00E1. */
