@@ -628,6 +628,15 @@ function migrarOverrides(){
   if(OVERRIDES.__cfg__ && OVERRIDES.__cfg__.fechaBase && !/^\d{4}-\d{2}$/.test(OVERRIDES.__cfg__.fechaBase)){
     OVERRIDES.__cfg__.fechaBase=ymFromMesAbbr(OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM; hubo=true;
   }
+  // Correccion puntual, una sola vez: la "fecha base" quedo guardada en jun-26 de una config vieja,
+  // y Micaela pidio expresamente que arranque en abril-26 en todas las solapas. El flag evita volver
+  // a pisarla si despues la cambia a mano en Config Pto.
+  if(!OVERRIDES.__cfg__) OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};
+  if(!OVERRIDES.__cfg__.fechaBaseForzadaAbr2026){
+    OVERRIDES.__cfg__.fechaBase="2026-04";
+    OVERRIDES.__cfg__.fechaBaseForzadaAbr2026=true;
+    hubo=true;
+  }
   const fechaVieja=(OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM;
   Object.keys(OVERRIDES).forEach(k=>{
     if(k==="__cfg__") return;
@@ -904,33 +913,31 @@ function renderPtoApertura(){
     const ptoM=ptoPorMes[i], cls=ptoM?(v>ptoM?" over":" under"):"";
     return `<td class="mescol${cls}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`;
   }).join("");
-  // El Total de la fila "Pto" no es la suma del Pto -- es el desvío ACUMULADO desde la fecha base
-  // (abril, salvo que se cambie en Config Pto), sin importar el filtro "Desde" de arriba. Mismo
-  // criterio que la columna "Acum. desde ..." de Presupuesto·Estructura.
-  const fechaBaseYM=(OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM;
-  const hastaActual=mesesSel[mesesSel.length-1];
-  const mesesAcum=meses.filter(m=>m>=fechaBaseYM&&(!hastaActual||m<=hastaActual));
-  const realPorMesTotal={};
-  todasT.forEach(t=>{ realPorMesTotal[t.mes]=(realPorMesTotal[t.mes]||0)+t.ars; });
-  const desvioAcum=mesesAcum.reduce((s,m)=>s+((realPorMesTotal[m]||0)-ptoMesFn(m)),0);
-  const totalArsCls=desvioAcum?(desvioAcum>0?" over":" under"):"";
   const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
+  // Fila "Pto": el mes a mes es el presupuesto de ese mes (vacío antes de que exista una vigencia
+  // cargada); el Total es la suma simple de esos mismos meses -- igual que la columna "Total ARS" de
+  // la fila TOTAL, no un acumulado aparte.
+  const ptoTotalSum=ptoPorMes.reduce((s,v)=>s+v,0);
   const ptoCells=ptoPorMes.map(v=>`<td class="mescol info" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
-  const ptoRow=`<tr><td class="fz fz1 info">Pto</td>${ptoCells}<td class="fzr info${totalArsCls}" style="text-align:right" title="Desvío acumulado desde ${esc(mesLabel(fechaBaseYM))}"><b>${fmt(desvioAcum)}</b></td><td class="fzr info"></td></tr>`;
-  // Fila "Desvío": real - Pto, mes a mes (a diferencia del Total de la fila Pto, que es acumulado
-  // desde la fecha base). Verde si viene por debajo del Pto, rojo si lo supera.
-  const desvioCells=colTot.map((v,i)=>{
-    const d=v-ptoPorMes[i], cls=d?(d>0?" over":" under"):"";
-    return `<td class="mescol info${cls}" style="text-align:right">${ptoPorMes[i]||v?fmt(d):"–"}</td>`;
+  const ptoRow=`<tr><td class="fz fz1 info">Pto</td>${ptoCells}<td class="fzr info" style="text-align:right"><b>${fmt(ptoTotalSum)}</b></td><td class="fzr info"></td></tr>`;
+  // Fila "Desvío": Pto - Real de cada mes (vacío en los meses sin Pto todavía); el Total es la
+  // sumatoria de esas mismas diferencias del período visible. Positivo (verde) = por debajo del
+  // Pto; negativo (rojo) = lo superó.
+  const desvios=colTot.map((v,i)=>ptoPorMes[i]?ptoPorMes[i]-v:null);
+  const desvioCells=desvios.map(d=>{
+    const cls=d?(d<0?" over":" under"):"";
+    return `<td class="mescol info${cls}" style="text-align:right">${d==null?"–":fmt(d)}</td>`;
   }).join("");
-  const desvioRow=`<tr><td class="fz fz1 info">Desvío</td>${desvioCells}<td class="fzr info${totalArsCls}" style="text-align:right"><b>${fmt(desvioAcum)}</b></td><td class="fzr info"></td></tr>`;
+  const desvioTotalSum=desvios.reduce((s,d)=>s+(d||0),0);
+  const totalArsCls=desvioTotalSum?(desvioTotalSum<0?" over":" under"):"";
+  const desvioRow=`<tr><td class="fz fz1 info">Desvío</td>${desvioCells}<td class="fzr info${totalArsCls}" style="text-align:right"><b>${fmt(desvioTotalSum)}</b></td><td class="fzr info"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("paTabla").className="grid";
   document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados) y la fila "Desvío" la diferencia real − Pto de cada mes — en <span class="under">verde</span> por debajo del Pto, en <span class="over">rojo</span> por encima; la columna Total de ambas es el desvío acumulado desde ${esc(mesLabel(fechaBaseYM))} (no depende del filtro "Desde" de arriba).`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).`;
   renderPtoAperturaPorConcepto(cuenta,mesesSel);
 }
 // Segunda tabla: Pto de CADA concepto mes a mes (no el real) -- muestra como se compone el Pto
@@ -1994,6 +2001,10 @@ function aperturaPtoVigente(cuenta,concepto,ym){
   const key=aperturaPtoKeyFor(cuenta,concepto); if(!key) return null;
   const h=APERTURA_PTO[cuenta][key].historial;
   if(!h||!h.length) return null;
+  // A diferencia de ptoVigente() (Presupuesto·Estructura), acá un mes ANTERIOR a la primera vigencia
+  // no devuelve nada (Pto = 0 / vacío) en vez de extrapolar hacia atrás -- a pedido de Micaela, para
+  // que la fila "Pto" de Apertura salga en blanco antes de que el presupuesto exista de verdad.
+  if(ym<h[0].desde) return null;
   let elegido=h[0];
   for(const e of h){ if(e.desde<=ym) elegido=e; else break; }
   return elegido;
