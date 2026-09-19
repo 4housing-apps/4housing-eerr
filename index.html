@@ -285,6 +285,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
   <div id="ptoSubApert" style="display:none">
     <div class="controls">
       <div class="ctl"><label for="paCuenta">Cuenta contable</label><select id="paCuenta"></select></div>
+      <div class="ctl"><label for="paGrupo">Grupo</label><select id="paGrupo"><option value="">Todos</option></select></div>
       <div class="ctl"><label for="paDesde">Desde</label><select id="paDesde"></select></div>
       <div class="ctl"><label for="paHasta">Hasta</label><select id="paHasta"></select></div>
       <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="ultimoAnioApertura()">Último año</button></div>
@@ -767,18 +768,31 @@ function ultimoAnioApertura(){
   aplicarUltimoAnio('paDesde','paHasta',meses,renderPtoApertura);
 }
 window.ultimoAnioApertura=ultimoAnioApertura;
+function poblarGrupoApertura(){
+  const cuenta=document.getElementById("paCuenta").value;
+  const grupos=APERTURA_GRUPOS[cuenta]||[];
+  const gsel=document.getElementById("paGrupo");
+  const actual=gsel.value;
+  gsel.innerHTML='<option value="">Todos</option>';
+  grupos.forEach(g=>gsel.add(new Option(g,g)));
+  if(grupos.includes(actual)) gsel.value=actual;
+}
 function initPtoApertura(){
   const sel=document.getElementById("paCuenta");
   sel.innerHTML="";APERTURA_CUENTAS.forEach(c=>sel.add(new Option(c,c)));
-  sel.addEventListener("change",()=>{poblarMesesApertura();renderPtoApertura();});
+  sel.addEventListener("change",()=>{poblarGrupoApertura();poblarMesesApertura();renderPtoApertura();});
+  document.getElementById("paGrupo").addEventListener("change",renderPtoApertura);
   document.getElementById("paDesde").addEventListener("change",renderPtoApertura);
   document.getElementById("paHasta").addEventListener("change",renderPtoApertura);
+  poblarGrupoApertura();
   poblarMesesApertura();
 }
 function renderPtoApertura(){
   const sel=document.getElementById("paCuenta"); if(!sel) return;
   const cuenta=sel.value;
-  const todasT=APERTURA_DETALLE[cuenta]||[];
+  const grupoSel=document.getElementById("paGrupo").value;
+  const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
+  const todasT=grupoSel?todasTCuenta.filter(t=>t.grupo===grupoSel):todasTCuenta;
   const meses=[...new Set(todasT.map(t=>t.mes))].sort();
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   // Auto-repara los selects de mes si quedaron desactualizados (ej. recien subiste un crudo nuevo
@@ -819,22 +833,30 @@ function renderPtoApertura(){
   const baseCuenta=ovCuenta?ovCuenta.base:"mensual";
   const ptoMesFn=m=>{ const v=ptoEnMes(cuenta,m,1); return baseCuenta==="anual"?v/12:v; };
   const ptoPorMes=mesesSel.map(ptoMesFn);
-  const ptoTotalPeriodo=ptoPorMes.reduce((s,v)=>s+v,0);
   const totCells=colTot.map((v,i)=>{
     const ptoM=ptoPorMes[i], cls=ptoM?(v>ptoM?" over":" under"):"";
     return `<td class="mescol${cls}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`;
   }).join("");
-  const totalArsCls=ptoTotalPeriodo?(total>ptoTotalPeriodo?" over":" under"):"";
-  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr${totalArsCls}" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
+  // El Total de la fila "Pto" no es la suma del Pto -- es el desvío ACUMULADO desde la fecha base
+  // (abril, salvo que se cambie en Config Pto), sin importar el filtro "Desde" de arriba. Mismo
+  // criterio que la columna "Acum. desde ..." de Presupuesto·Estructura.
+  const fechaBaseYM=(OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM;
+  const hastaActual=mesesSel[mesesSel.length-1];
+  const mesesAcum=meses.filter(m=>m>=fechaBaseYM&&(!hastaActual||m<=hastaActual));
+  const realPorMesTotal={};
+  todasT.forEach(t=>{ realPorMesTotal[t.mes]=(realPorMesTotal[t.mes]||0)+t.ars; });
+  const desvioAcum=mesesAcum.reduce((s,m)=>s+((realPorMesTotal[m]||0)-ptoMesFn(m)),0);
+  const totalArsCls=desvioAcum?(desvioAcum>0?" over":" under"):"";
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
   const ptoCells=ptoPorMes.map(v=>`<td class="mescol info" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
-  const ptoRow=`<tr><td class="fz fz1 info">Pto</td>${ptoCells}<td class="fzr info" style="text-align:right"><b>${fmt(ptoTotalPeriodo)}</b></td><td class="fzr info"></td></tr>`;
+  const ptoRow=`<tr><td class="fz fz1 info">Pto</td>${ptoCells}<td class="fzr info${totalArsCls}" style="text-align:right" title="Desvío acumulado desde ${esc(mesLabel(fechaBaseYM))}"><b>${fmt(desvioAcum)}</b></td><td class="fzr info"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("paTabla").className="grid";
   document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" es el presupuesto mensual de la cuenta (mismo dato de Presupuesto·Estructura); el TOTAL se marca en <span class="under">verde</span> si el real quedó por debajo, o en <span class="over">rojo</span> si lo superó.`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual de la cuenta (mismo dato de Presupuesto·Estructura) y, en la columna Total, el desvío acumulado desde ${esc(mesLabel(fechaBaseYM))} (no depende del filtro "Desde" de arriba) — en <span class="under">verde</span> si viene por debajo del Pto, en <span class="over">rojo</span> si lo supera.`;
 }
 window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
 // Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
@@ -1735,8 +1757,13 @@ function mergeEERRIntoData(res){
 /* Apertura de Estructura: cuentas para las que ADEMAS del total mensual guardamos el detalle
    transaccion por transaccion (para poder ver de que se compone, ej. que proveedores). Se agrega
    de a una cuenta por vez, a pedido de Micaela -- ver CLASIF_APERTURA_FN mas abajo para la regla
-   de cada una. Acotado a proposito (no todas las ~100 cuentas de Estructura) para no guardar de mas. */
+   de cada una. Acotado a proposito (no todas las ~100 cuentas de Estructura) para no guardar de mas.
+   APERTURA_GRUPOS acota, ademas, a que grupos (columna "Desc. auxiliar") pertenece cada cuenta --
+   necesario porque el mismo nombre de cuenta ("Alquileres") puede aparecer bajo otro grupo que no
+   tiene nada que ver (ej. "Q) AJUSTES CTAS" para el ajuste por AXI de fin de ejercicio): sin este
+   filtro, esos importes se colaban en el detalle como si fueran gasto real de la cuenta. */
 const APERTURA_CUENTAS=["Alquileres"];
+const APERTURA_GRUPOS={"Alquileres":["K) ESTRUCTURA","K) ESTRUCTURA NQN"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -1756,9 +1783,9 @@ function parseRawLedgerCuentas(rows){
     if(!cagg[k]) cagg[k]={};
     if(!cagg[k][y]) cagg[k][y]=[0,0,0,0];
     const a=cagg[k][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
-    if(APERTURA_CUENTAS.includes(cuenta)){
+    if(APERTURA_CUENTAS.includes(cuenta) && (!APERTURA_GRUPOS[cuenta]||APERTURA_GRUPOS[cuenta].includes(grupo))){
       if(!detalle[cuenta]) detalle[cuenta]=[];
-      detalle[cuenta].push({mes:y,fecha:dstr,origen,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,ars:Math.round(ars*100)/100});
+      detalle[cuenta].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,ars:Math.round(ars*100)/100});
     }
   }
   const out={};
