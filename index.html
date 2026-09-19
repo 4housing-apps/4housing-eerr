@@ -754,8 +754,9 @@ function renderPtoApertura(){
   if(pd.options.length!==meses.length) poblarMesesApertura();
   const i0=+pd.value||0, i1=+ph.value||0;
   const a=Math.min(i0,i1),b=Math.max(i0,i1);
-  const mesesSel=new Set(meses.slice(a,b+1));
-  const txs=todasT.filter(t=>mesesSel.has(t.mes));
+  const mesesSel=meses.slice(a,b+1);
+  const mesesSelSet=new Set(mesesSel);
+  const txs=todasT.filter(t=>mesesSelSet.has(t.mes));
   const clasFn=CLASIF_APERTURA_FN[cuenta];
   if(!clasFn){
     document.getElementById("paKpis").innerHTML="";
@@ -766,16 +767,23 @@ function renderPtoApertura(){
   const grupos={};
   txs.forEach(t=>{
     const concepto=clasFn(t)||"Otros";
-    if(!grupos[concepto]) grupos[concepto]={ars:0,n:0};
+    if(!grupos[concepto]) grupos[concepto]={ars:0,n:0,porMes:{}};
     grupos[concepto].ars+=t.ars;grupos[concepto].n++;
+    grupos[concepto].porMes[t.mes]=(grupos[concepto].porMes[t.mes]||0)+t.ars;
   });
   const conceptos=Object.keys(grupos).sort((x,y)=>grupos[y].ars-grupos[x].ars);
   const total=conceptos.reduce((s,k)=>s+grupos[k].ars,0);
-  const rowsHtml=conceptos.map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right">${fmt(grupos[k].ars)}</td><td style="text-align:right" class="mut">${grupos[k].n}</td></tr>`).join("")
-    ||`<tr><td colspan="3" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
-  document.getElementById("paTabla").innerHTML=`<thead><tr><th>Concepto</th><th>Total ARS</th><th>Asientos</th></tr></thead><tbody>${rowsHtml}<tr class="result"><td>TOTAL</td><td style="text-align:right"><b>${fmt(total)}</b></td><td style="text-align:right">${txs.length}</td></tr></tbody>`;
+  const colTot=mesesSel.map(()=>0);
+  const rowsHtml=conceptos.map(k=>{
+    const cells=mesesSel.map((m,i)=>{ const v=grupos[k].porMes[m]||0; colTot[i]+=v; return `<td style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    return `<tr><td class="ell" style="max-width:200px" title="${esc(k)}">${esc(k)}</td>${cells}<td style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td style="text-align:right" class="mut">${grupos[k].n}</td></tr>`;
+  }).join("") || `<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
+  const totCells=colTot.map(v=>`<td style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
+  const totalRow=`<tr class="result"><td>TOTAL</td>${totCells}<td style="text-align:right"><b>${fmt(total)}</b></td><td style="text-align:right">${txs.length}</td></tr>`;
+  const monthHdr=mesesSel.map(m=>`<th>${mesLabel(m)}</th>`).join("");
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th style="text-align:left">Concepto</th>${monthHdr}<th>Total ARS</th><th>Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto según la regla que definimos para esta cuenta.`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}", agrupado por concepto y mes según la regla que definimos para esta cuenta.`;
 }
 window.cfgChange=function(f,v){if(!OVERRIDES.__cfg__)OVERRIDES.__cfg__={fechaBase:FECHA_BASE_DEFAULT_YM,tcOf:1455,tcBill:1435};OVERRIDES.__cfg__[f]=(f==="fechaBase")?v:(parseFloat(v)||0);saveOverrides();renderPto();};
 // Meses disponibles + "extra" meses futuros (para poder declarar una vigencia de Pto que todavia
