@@ -840,7 +840,12 @@ function poblarGrupoApertura(){
   const gsel=document.getElementById("paGrupo");
   const actual=gsel.value;
   gsel.innerHTML='<option value="">Todos</option>';
-  grupos.forEach(g=>gsel.add(new Option(g,g)));
+  // Si hay dos Grupos que a simple vista dicen lo mismo pero son valores distintos (ej. un espacio o
+  // caracter invisible de diferencia en el crudo), se van a ver como dos opciones separadas -- el
+  // "(N)" al final es la cantidad de caracteres de cada uno, para poder notar la diferencia aunque no
+  // se vea a simple vista. Si para una cuenta todos los Grupos miden igual, es un buen indicio de que
+  // el problema no es un caracter invisible sino otra cosa.
+  grupos.forEach(g=>gsel.add(new Option(g+" ("+g.length+")",g)));
   if(grupos.includes(actual)) gsel.value=actual;
 }
 function initPtoApertura(){
@@ -2018,7 +2023,14 @@ async function saveAperturaPto(){ guardarClave('APERTURA_PTO',APERTURA_PTO); }
 // (ej. podria venir "PRINCI SRL" en vez de "PRINCI"). Para no depender de que coincida caracter a
 // caracter con la clave que carguemos en APERTURA_PTO, matchea por igualdad exacta primero y, si no
 // hay, por contencion (sin mayusc/minusc) en cualquiera de los dos sentidos.
-function normApertura(s){ return (s||"").replace(/ /g," ").replace(/\s+/g," ").toUpperCase().trim(); }
+function normApertura(s){
+  return (s||"")
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF\u00AD]/g,"")
+    .replace(/\u00A0/g," ")
+    .replace(/\s+/g," ")
+    .toUpperCase().trim();
+}
 function aperturaPtoKeyFor(cuenta,concepto){
   const map=APERTURA_PTO[cuenta]; if(!map) return null;
   if(map[concepto]) return concepto;
