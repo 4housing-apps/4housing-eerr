@@ -66,7 +66,7 @@ body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSys
 .subtab{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 14px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;}
 .subtab.active{background:var(--ink);color:#fff;border-color:var(--ink);}
 .content{flex:1 1 auto;min-width:0;overflow-x:hidden;}
-.wrap{max-width:1200px;margin:0 auto;padding:26px 28px 60px;}
+.wrap{max-width:1800px;margin:0 auto;padding:18px 18px 50px;}
 header.top{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;}
 h1{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0;}
 .sub{color:var(--muted);font-size:12px;margin-top:3px;}
@@ -818,6 +818,12 @@ window.addEventListener("resize",()=>{
 });
 let pMostrarDetallePto=false; // Base/Pto Pesos/Pto-mes empiezan escondidos: son de consulta ocasional
                                // y ocupan lugar que se necesita para ver más meses de gasto real.
+function togglePtoDetalle(){
+  pMostrarDetallePto=!pMostrarDetallePto;
+  const cb=document.getElementById("pTogglePtoPesos"); if(cb) cb.checked=pMostrarDetallePto;
+  renderPto();
+}
+window.togglePtoDetalle=togglePtoDetalle;
   function renderPto(){
   const resp=document.getElementById("pResp").value;
   const allm=pMonths(), i0=+document.getElementById("pDesde").value, i1=+document.getElementById("pHasta").value;
@@ -891,7 +897,7 @@ let pMostrarDetallePto=false; // Base/Pto Pesos/Pto-mes empiezan escondidos: son
   document.getElementById("pTabla").innerHTML=
     `<thead><tr>
       <th class="fz fz1 real">${ptoTh("Cuenta","cuenta",rowsPreCol)}</th>
-      <th class="fz fz2 real">${ptoTh("Resp.","responsable",rowsPreCol)}</th>
+      <th class="fz fz2 real">${ptoTh("Resp.","responsable",rowsPreCol)} <span onclick="togglePtoDetalle()" title="${pMostrarDetallePto?'Ocultar':'Mostrar'} Base / Pto Pesos / Pto mes" style="cursor:pointer;font-weight:900;opacity:.6">${pMostrarDetallePto?"«":"»"}</span></th>
       ${pMostrarDetallePto?`<th class="fz fz3 info">${ptoTh("Base","base",rowsPreCol)}</th>
       <th class="fz fz4 info">Pto ${curTag}<br><small style="font-weight:400;opacity:.6">base ${esc(mesLabel(fechaBaseYM))}</small></th>
       <th class="fz fz5 grp info">Pto/mes<br><small style="font-weight:400;opacity:.6">${esc(mesLabel(ultimo||fechaBaseYM))}</small></th>`:""}${monthHdr}
