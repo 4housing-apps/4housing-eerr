@@ -233,6 +233,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
     <div class="ctl"><label for="from">Desde</label><select id="from"></select></div>
     <div class="ctl"><label for="to">Hasta</label><select id="to"></select></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="aplicarUltimoAnio('from','to',DATA.meses,recompute)">Último año</button></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="tablaCsv">Descargar Excel</button></div>
   </div>
   <div class="kpis" id="kpis"></div>
@@ -271,6 +272,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label for="pFiltro">Cuentas</label><select id="pFiltro"><option value="datos">Con presupuesto o gasto</option><option value="todas">Todas las cuentas</option></select></div>
       <div class="ctl"><label for="pDesde">Desde</label><select id="pDesde"></select></div>
       <div class="ctl"><label for="pHasta">Hasta</label><select id="pHasta"></select></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="aplicarUltimoAnio('pDesde','pHasta',pMonths(),renderPto)">Último año</button></div>
       <div class="ctl"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;padding:9px 0"><input type="checkbox" id="pTogglePtoPesos"> Mostrar Base / Pto ($) / Pto mes</label></div>
       <span class="note">Cargá el presupuesto en <b>pesos de hoy</b> (fecha base abajo). En <b>pesos</b> se muestra plano; en <b>AXI</b> ajustado por inflación; en <b>USD</b> queda fijo al cierre del 30/06. Editable; se guarda en este navegador.</span>
     </div>
@@ -285,6 +287,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label for="paCuenta">Cuenta contable</label><select id="paCuenta"></select></div>
       <div class="ctl"><label for="paDesde">Desde</label><select id="paDesde"></select></div>
       <div class="ctl"><label for="paHasta">Hasta</label><select id="paHasta"></select></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="ultimoAnioApertura()">Último año</button></div>
       <span class="note">Desglose transacción por transacción del crudo "02-EERR" para esta cuenta, agrupado por concepto. Se va agregando cuenta por cuenta, a pedido.</span>
     </div>
     <div class="kpis" id="paKpis"></div>
@@ -308,6 +311,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label>Moneda</label><select id="cmvCur"><option value="0">Pesos (ARS)</option><option value="1">USD Oficial</option><option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
       <div class="ctl"><label>Período desde</label><select id="cmvDesde"></select></div>
       <div class="ctl"><label>Período hasta</label><select id="cmvHasta"></select></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="aplicarUltimoAnio('cmvDesde','cmvHasta',PROJ_DATA.meses,renderCMV)">Último año</button></div>
       <div class="ctl"><label>Proy. ejecutados desde</label><input id="cmvFiltroDesde" class="cmin txt" placeholder="MM/AAAA" style="width:100px"></div>
       <div class="ctl"><label>hasta</label><input id="cmvFiltroHasta" class="cmin txt" placeholder="MM/AAAA" style="width:100px"></div>
       <div class="ctl"><label>Inversión</label><label class="invchk"><input type="checkbox" id="cmvExclInv"> Excluir del costo</label></div>
@@ -336,6 +340,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
     <div class="ctl"><label for="pyDesde">Desde</label><select id="pyDesde"></select></div>
     <div class="ctl"><label for="pyHasta">Hasta</label><select id="pyHasta"></select></div>
+    <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="aplicarUltimoAnio('pyDesde','pyHasta',PROY_CTRL.meses,()=>{renderProyManual();renderProy();})">Último año</button></div>
     <div class="ctl"><label for="pyMinDif">Diferencia mínima ($)</label><input id="pyMinDif" class="txt" style="width:90px" placeholder="0" value="0"></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="pyBtn1pct">Solo diferencia &gt; 1%</button></div>
     <div class="ctl"><label>&nbsp;</label><button class="btn" id="pyCsv">Descargar Excel</button></div>
@@ -558,6 +563,25 @@ function onLockClick(){
    FECHA_BASE_DEFAULT_YM es el inicio del ejercicio (abril) usado como "desde" por defecto para
    cuentas sin historial propio todavia, y como referencia de la columna "Pto Pesos". */
 const FECHA_BASE_DEFAULT_YM="2026-04";
+// Indice, dentro de un array de meses "AAAA-MM" ordenado, del mes que corresponde usar como "Desde"
+// por defecto en cualquier pestaña (inicio de ejercicio configurado en Config Pto, o abril-26 si
+// todavia no se configuro nada) -- 0 si ese mes no esta en el array (ej. todavia no hay datos tan
+// atras, o el array esta vacio).
+function indiceFechaBase(meses){
+  const fb=(typeof OVERRIDES!=="undefined"&&OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM;
+  const idx=meses.indexOf(fb);
+  return idx>=0?idx:0;
+}
+// Selecciona, en un par de selects "Desde"/"Hasta" poblados con `meses` (array "AAAA-MM" ordenado),
+// los ultimos 12 meses disponibles (o todos, si hay menos de 12) y vuelve a dibujar con `renderFn`.
+function aplicarUltimoAnio(idDesde,idHasta,meses,renderFn){
+  const pd=document.getElementById(idDesde),ph=document.getElementById(idHasta);
+  if(!pd||!ph||!meses||!meses.length) return;
+  const last=meses.length-1,first=Math.max(0,last-11);
+  pd.value=first;ph.value=last;
+  if(renderFn) renderFn();
+}
+window.aplicarUltimoAnio=aplicarUltimoAnio;
 function ymFromMesAbbr(s){
   if(!s) return null;
   const m=(""+s).trim().toLowerCase().match(/^([a-z]{3})-(\d{2})$/);
@@ -641,8 +665,7 @@ async function initPto(){
   const pr=document.getElementById("pResp");pr.add(new Option("Todos los responsables",""));resps.forEach(r=>pr.add(new Option(r,r)));
   const ms=pMonths(),pd=document.getElementById("pDesde"),ph=document.getElementById("pHasta");
   ms.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
-  const idxFechaBase=ms.indexOf((OVERRIDES.__cfg__&&OVERRIDES.__cfg__.fechaBase)||FECHA_BASE_DEFAULT_YM);
-  pd.value=idxFechaBase>=0?idxFechaBase:0;ph.value=ms.length-1;
+  pd.value=indiceFechaBase(ms);ph.value=ms.length-1;
   ["pResp","pFiltro","pDesde","pHasta","pBloque"].forEach(id=>document.getElementById(id).addEventListener("change",renderPto));
   document.getElementById("pTabla").addEventListener("change",e=>{
     if(!editable)return;const c=e.target.dataset.c;if(!c||!OVERRIDES[c])return;
@@ -736,8 +759,14 @@ function poblarMesesApertura(){
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   pd.innerHTML="";ph.innerHTML="";
   meses.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
-  pd.value=0;ph.value=Math.max(0,meses.length-1);
+  pd.value=indiceFechaBase(meses);ph.value=Math.max(0,meses.length-1);
 }
+function ultimoAnioApertura(){
+  const cuenta=document.getElementById("paCuenta").value;
+  const meses=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t.mes))].sort();
+  aplicarUltimoAnio('paDesde','paHasta',meses,renderPtoApertura);
+}
+window.ultimoAnioApertura=ultimoAnioApertura;
 function initPtoApertura(){
   const sel=document.getElementById("paCuenta");
   sel.innerHTML="";APERTURA_CUENTAS.forEach(c=>sel.add(new Option(c,c)));
@@ -1190,7 +1219,7 @@ async function initCMV(){
   await loadProjOv();
   const allm=PROJ_DATA.meses,cd=document.getElementById("cmvDesde"),ch=document.getElementById("cmvHasta");
   allm.forEach((m,i)=>{cd.add(new Option(mesLabel(m),i));ch.add(new Option(mesLabel(m),i));});
-  cd.value=0;ch.value=allm.length-1;
+  cd.value=indiceFechaBase(allm);ch.value=allm.length-1;
   ["cmvCur","cmvDesde","cmvHasta","cmvExclInv"].forEach(id=>document.getElementById(id).addEventListener("change",renderCMV));
   ["cmvFiltroDesde","cmvFiltroHasta"].forEach(id=>document.getElementById(id).addEventListener("input",renderCMV));
   document.getElementById("cmvTabla").addEventListener("change",e=>{
@@ -1212,7 +1241,7 @@ function initEerrUI(){
   const f=document.getElementById("from"),t=document.getElementById("to");
   f.innerHTML="";t.innerHTML="";
   DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
-  f.value=0;t.value=DATA.meses.length-1;
+  f.value=indiceFechaBase(DATA.meses);t.value=DATA.meses.length-1;
   ["cur","from","to"].forEach(id=>document.getElementById(id).addEventListener("change",recompute));
   document.getElementById("chSel").addEventListener("change",recompute);
   document.getElementById("chView").addEventListener("change",()=>{
@@ -2133,7 +2162,7 @@ function initProy(){
   const d=document.getElementById("pyDesde"),h=document.getElementById("pyHasta");
   d.innerHTML="";h.innerHTML="";
   PROY_CTRL.meses.forEach((m,i)=>{d.add(new Option(mesLabel(m),i));h.add(new Option(mesLabel(m),i));});
-  if(PROY_CTRL.meses.length){ d.value=0; h.value=PROY_CTRL.meses.length-1; }
+  if(PROY_CTRL.meses.length){ d.value=indiceFechaBase(PROY_CTRL.meses); h.value=PROY_CTRL.meses.length-1; }
   if(!initProy._wired){
     initProy._wired=true;
     ["pyProy","pyCur","pyDesde","pyHasta"].forEach(id=>document.getElementById(id).addEventListener("change",()=>{renderProyManual();renderProy();}));
@@ -2357,14 +2386,14 @@ async function onCargarInformeCrudo(file){
     const f=document.getElementById("from"),t=document.getElementById("to");
     f.innerHTML="";t.innerHTML="";
     DATA.meses.forEach((m,i)=>{f.add(new Option(mesLabel(m),i));t.add(new Option(mesLabel(m),i));});
-    f.value=0;t.value=DATA.meses.length-1;
+    f.value=indiceFechaBase(DATA.meses);t.value=DATA.meses.length-1;
     recompute();
     renderHistLockUI();
     try{
       const pd=document.getElementById("pDesde"),ph=document.getElementById("pHasta"),pm=pMonths();
       pd.innerHTML="";ph.innerHTML="";
       pm.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
-      pd.value=0;ph.value=pm.length-1;
+      pd.value=indiceFechaBase(pm);ph.value=pm.length-1;
       renderPto();
     }catch(e){console.warn("pto:",e);}
     try{ poblarMesesApertura(); renderPtoApertura(); }catch(e){console.warn("apertura:",e);}
@@ -2372,7 +2401,7 @@ async function onCargarInformeCrudo(file){
       const cd=document.getElementById("cmvDesde"),ch=document.getElementById("cmvHasta");
       cd.innerHTML="";ch.innerHTML="";
       PROJ_DATA.meses.forEach((m,i)=>{cd.add(new Option(mesLabel(m),i));ch.add(new Option(mesLabel(m),i));});
-      cd.value=0;ch.value=PROJ_DATA.meses.length-1;
+      cd.value=indiceFechaBase(PROJ_DATA.meses);ch.value=PROJ_DATA.meses.length-1;
       renderCMV();
     }catch(e){console.warn("cmv:",e);}
     const nIgnor=Object.values(res.gruposIgnorados).reduce((s,v)=>s+v,0);
