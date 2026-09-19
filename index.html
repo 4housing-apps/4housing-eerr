@@ -817,9 +817,22 @@ function renderPtoHist(){
 }
 /* ===== Apertura de Estructura: desglose transaccion por transaccion de una cuenta, agrupado por
    "Concepto" segun la regla de CLASIF_APERTURA_FN. Se agrega cuenta por cuenta, a pedido. ===== */
+// Meses disponibles para una cuenta, ya acotados al Grupo elegido arriba (si hay alguno). Usada
+// tanto para poblar Desde/Hasta como, adentro de renderPtoApertura, para saber que rango recortar --
+// ANTES cada lugar calculaba "meses" por su cuenta y con criterios distintos (uno sin filtrar por
+// Grupo, el otro sí): si un Grupo tiene menos meses que el total de la cuenta (ej. "Estructura NQN"
+// arranca despues que "Estructura"), los indices de Desde/Hasta quedaban calculados sobre la lista
+// larga pero se aplicaban sobre la lista corta -- el recorte caía fuera de rango y daba una lista
+// vacia, aunque el filtro de Grupo sí hubiera encontrado movimientos (bug real, detectado 2026-09-19).
+function mesesApertura(cuenta,grupoSel){
+  const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
+  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t.grupo)===normApertura(grupoSel)):todasTCuenta;
+  return [...new Set(todasT.map(t=>t.mes))].sort();
+}
 function poblarMesesApertura(){
   const cuenta=document.getElementById("paCuenta").value;
-  const meses=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t.mes))].sort();
+  const grupoSel=document.getElementById("paGrupo").value;
+  const meses=mesesApertura(cuenta,grupoSel);
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   pd.innerHTML="";ph.innerHTML="";
   meses.forEach((m,i)=>{pd.add(new Option(mesLabel(m),i));ph.add(new Option(mesLabel(m),i));});
@@ -827,7 +840,8 @@ function poblarMesesApertura(){
 }
 function ultimoAnioApertura(){
   const cuenta=document.getElementById("paCuenta").value;
-  const meses=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t.mes))].sort();
+  const grupoSel=document.getElementById("paGrupo").value;
+  const meses=mesesApertura(cuenta,grupoSel);
   aplicarUltimoAnio('paDesde','paHasta',meses,renderPtoApertura);
 }
 window.ultimoAnioApertura=ultimoAnioApertura;
@@ -865,7 +879,7 @@ function initPtoApertura(){
   const sel=document.getElementById("paCuenta");
   sel.innerHTML="";APERTURA_CUENTAS.forEach(c=>sel.add(new Option(c,c)));
   sel.addEventListener("change",()=>{poblarGrupoApertura();poblarMesesApertura();renderPtoApertura();});
-  document.getElementById("paGrupo").addEventListener("change",renderPtoApertura);
+  document.getElementById("paGrupo").addEventListener("change",()=>{poblarMesesApertura();renderPtoApertura();});
   document.getElementById("paDesde").addEventListener("change",renderPtoApertura);
   document.getElementById("paHasta").addEventListener("change",renderPtoApertura);
   poblarGrupoApertura();
@@ -877,7 +891,7 @@ function renderPtoApertura(){
   const grupoSel=document.getElementById("paGrupo").value;
   const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
   const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t.grupo)===normApertura(grupoSel)):todasTCuenta;
-  const meses=[...new Set(todasT.map(t=>t.mes))].sort();
+  const meses=mesesApertura(cuenta,grupoSel);
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   // Auto-repara los selects de mes si quedaron desactualizados (ej. recien subiste un crudo nuevo
   // y todavia no se repoblaron) -- evita mostrar un rango vacio o de un solo mes por accidente.
