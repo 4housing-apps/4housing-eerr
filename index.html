@@ -526,7 +526,7 @@ function showPtoSub(v){
   document.getElementById("ptoSubBtnApert").classList.toggle("active",v==="apert");
   document.getElementById("ptoSubBtnHist").classList.toggle("active",v==="hist");
   if(v==="hist") renderPtoHist();
-  else if(v==="apert") renderPtoApertura();
+  else if(v==="apert"){ poblarMesesApertura(); renderPtoApertura(); }
   else requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); });
 }
 window.showPtoSub=showPtoSub;
@@ -748,7 +748,11 @@ function renderPtoApertura(){
   const cuenta=sel.value;
   const todasT=APERTURA_DETALLE[cuenta]||[];
   const meses=[...new Set(todasT.map(t=>t.mes))].sort();
-  const i0=+document.getElementById("paDesde").value||0, i1=+document.getElementById("paHasta").value||0;
+  const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
+  // Auto-repara los selects de mes si quedaron desactualizados (ej. recien subiste un crudo nuevo
+  // y todavia no se repoblaron) -- evita mostrar un rango vacio o de un solo mes por accidente.
+  if(pd.options.length!==meses.length) poblarMesesApertura();
+  const i0=+pd.value||0, i1=+ph.value||0;
   const a=Math.min(i0,i1),b=Math.max(i0,i1);
   const mesesSel=new Set(meses.slice(a,b+1));
   const txs=todasT.filter(t=>mesesSel.has(t.mes));
@@ -2306,6 +2310,7 @@ async function onCargarInformeCrudo(file){
       pd.value=0;ph.value=pm.length-1;
       renderPto();
     }catch(e){console.warn("pto:",e);}
+    try{ poblarMesesApertura(); renderPtoApertura(); }catch(e){console.warn("apertura:",e);}
     try{
       const cd=document.getElementById("cmvDesde"),ch=document.getElementById("cmvHasta");
       cd.innerHTML="";ch.innerHTML="";
