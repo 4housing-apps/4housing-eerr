@@ -900,8 +900,12 @@ function renderPtoApertura(){
   // sale de las transacciones reales del período elegido) -- asi un concepto que se dio de baja
   // (ej. PRINCI a partir de julio, por la compra del terreno) sigue sumando su Pto (0 desde esa
   // vigencia) aunque ya no tenga movimientos en el rango visible.
-  const ptoConceptos=Object.keys(APERTURA_PTO[cuenta]||{});
-  const tienePtoPorConcepto=!!ptoConceptos.length;
+  // Si hay elegido un Grupo especifico (arriba), el Pto tambien se acota a los conceptos de ESE
+  // grupo (ej. "K) ESTRUCTURA" -> PRINCI+BERGER+Expensas, sin SPWORK) -- son "dos Ptos distintos"
+  // que se ven sumados en una sola fila cuando el filtro esta en "Todos".
+  const ptoConceptosTodos=Object.keys(APERTURA_PTO[cuenta]||{});
+  const ptoConceptos=grupoSel?ptoConceptosTodos.filter(k=>aperturaPtoGrupoDe(cuenta,k)===grupoSel):ptoConceptosTodos;
+  const tienePtoPorConcepto=!!ptoConceptosTodos.length;
   const ovCuenta=OVERRIDES[cuenta];
   const baseCuenta=ovCuenta?ovCuenta.base:"mensual";
   const ptoMesFn=m=>{
@@ -938,15 +942,17 @@ function renderPtoApertura(){
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
   document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).`;
-  renderPtoAperturaPorConcepto(cuenta,mesesSel);
+  renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
 }
 // Segunda tabla: Pto de CADA concepto mes a mes (no el real) -- muestra como se compone el Pto
 // agregado de arriba, con la escalada por inflación de cada vigencia (misma lógica que Presupuesto).
 // Usa los conceptos que tienen Pto cargado (APERTURA_PTO), no los de la tabla de arriba -- para que
-// un concepto dado de baja (sin transacciones en el rango visible) siga mostrando su fila.
-function renderPtoAperturaPorConcepto(cuenta,mesesSel){
+// un concepto dado de baja (sin transacciones en el rango visible) siga mostrando su fila. Si hay un
+// Grupo elegido arriba, se acota a los conceptos de ese Grupo (ver APERTURA_PTO_GRUPO).
+function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   const wrap=document.getElementById("paPtoWrap"), tabla=document.getElementById("paPtoTabla"), foot=document.getElementById("paPtoFoot");
-  const ptoKeys=Object.keys(APERTURA_PTO[cuenta]||{});
+  let ptoKeys=Object.keys(APERTURA_PTO[cuenta]||{});
+  if(grupoSel) ptoKeys=ptoKeys.filter(k=>aperturaPtoGrupoDe(cuenta,k)===grupoSel);
   // Mismo orden manual que la tabla de arriba (APERTURA_ORDEN), para que las dos tablas se lean
   // consistentes; los conceptos con Pto que todavia no entraron en ese orden van al final.
   const ordenGuardado=(APERTURA_ORDEN[cuenta]||[]).filter(k=>ptoKeys.includes(k));
@@ -1972,6 +1978,22 @@ const APERTURA_PTO_SEED={
     "Expensas Of. CABA":[{desde:"2026-04",pto:730000}]
   }
 };
+// A que "Grupo" (Aux 02, ej. "K) ESTRUCTURA" / "K) ESTRUCTURA NQN") pertenece el Pto de cada
+// concepto -- se declara a mano, no se deduce de las transacciones reales, porque el Pto es un dato
+// de planificacion de Micaela (dijo expresamente "Alquiler Estructura $11.130.000" = PRINCI+BERGER+
+// Expensas, y "Alquiler Estructura NQN $7.050.000" = SPWORK) y no depende de con que Grupo haya
+// quedado cargado cada comprobante en Tango. Con esto, al elegir un Grupo en el filtro de arriba el
+// Pto que se ve es solo el de ese Grupo; con "Todos" se ven sumados los dos, en una sola fila.
+const APERTURA_PTO_GRUPO={
+  "Alquileres":{"PRINCI":"K) ESTRUCTURA","BERGER":"K) ESTRUCTURA","Expensas Of. CABA":"K) ESTRUCTURA","SPWORK":"K) ESTRUCTURA NQN"}
+};
+function aperturaPtoGrupoDe(cuenta,concepto){
+  const map=APERTURA_PTO_GRUPO[cuenta]; if(!map) return null;
+  if(map[concepto]) return map[concepto];
+  const nc=normApertura(concepto);
+  const k=Object.keys(map).find(kk=>{ const nk=normApertura(kk); return nc===nk||nc.startsWith(nk)||nk.startsWith(nc); });
+  return k?map[k]:null;
+}
 function loadAperturaPtoSeed(){
   let hubo=false;
   Object.keys(APERTURA_PTO_SEED).forEach(cuenta=>{
