@@ -1698,23 +1698,26 @@ function parseRawLedgerCuentas(rows){
 }
 const APERTURA_DETALLE={}; // cuenta -> [ {mes,fecha,origen,tipoComp,razonSocial,comprobante,ars}, ... ]
 function mergeAperturaIntoData(resCuentas){
-  // Mismo criterio de siempre: el archivo reemplaza los meses NO bloqueados que cubre; los meses
-  // bloqueados por HIST_LOCK se conservan tal cual, vengan o no en el archivo nuevo.
+  // A diferencia del resto de la app, el detalle de Apertura de Estructura NO respeta HIST_LOCK:
+  // es informacion complementaria para mirar de que se compone una cuenta, no toca ninguno de los
+  // totales oficiales que el bloqueo protege -- asi que no hace falta desbloquear/re-bloquear para
+  // actualizarla, ni cargarla en un lugar aparte. Simplemente reemplaza, por cuenta, los meses que
+  // trae CADA archivo que se sube (historico o actual); los meses que ese archivo no toca quedan
+  // como estaban (por eso subir el archivo de un mes no borra el detalle de los demas).
   APERTURA_CUENTAS.forEach(cuenta=>{
-    const viejo=(APERTURA_DETALLE[cuenta]||[]).filter(t=>mesBloqueado(t.mes));
-    const nuevo=(resCuentas.detalle[cuenta]||[]).filter(t=>!mesBloqueado(t.mes));
+    const nuevo=resCuentas.detalle[cuenta]||[];
+    const mesesNuevos=new Set(nuevo.map(t=>t.mes));
+    const viejo=(APERTURA_DETALLE[cuenta]||[]).filter(t=>!mesesNuevos.has(t.mes));
     APERTURA_DETALLE[cuenta]=[...viejo,...nuevo];
   });
 }
 /* Reglas de clasificacion de "Apertura de Estructura": una funcion por cuenta que recibe una
    transaccion (de APERTURA_DETALLE) y devuelve el "Concepto" bajo el que se agrupa en la pantalla.
-   Se define codigo por codigo -- avisame para cada cuenta nueva como clasificarla y la agrego ac\u00E1.
-   Supuesto a confirmar con Micaela: "viene de tesorer\u00EDa" = Origen "ContaParam" (carga manual de
-   contabilidad/tesorer\u00EDa, a diferencia de "Compras" que es autom\u00E1tica desde el circuito de compras). */
+   Se define codigo por codigo -- avisame para cada cuenta nueva como clasificarla y la agrego ac\u00E1. */
 const CLASIF_APERTURA_FN={
   "Alquileres": t=>{
     if(t.origen==="Compras") return t.razonSocial||"(sin proveedor)";
-    if(t.origen==="ContaParam" && /EXP/i.test(t.tipoComp)) return "Expensas Of. CABA";
+    if(t.origen==="Tesoreria" && /EXP/i.test(t.tipoComp)) return "Expensas Of. CABA";
     return "Otros";
   }
 };
