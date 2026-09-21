@@ -437,16 +437,20 @@ function recompute(){
   const pg=DATA.grupos.map(g=>{let tot=0;const s={};meses.forEach(m=>{const d=disp(g,m,cur);s[m]=d;tot+=d;});return{grupo:g.grupo,movim:g.movim,sec:seccion(g.grupo),letra:LETRA(g.grupo),tot,serie:s};});
   const ventasBruto=pg.filter(x=>x.grupo==="A) VENTA").reduce((s,x)=>s+x.tot,0);
   const margenS=sumSerie(pg,meses,["VENTAS"]);
-  const resOpS=sumaSerie(margenS,sumSerie(pg,meses,["ESTRUCTURA"]));
+  // Resultado operativo, Otros resultados y Margen bruto muestran cada uno SOLO el resultado de
+  // los conceptos de su propio Grupo (Ventas/Estructura/Servicios) -- antes "Resultado operativo"
+  // venía acumulado con el margen, a pedido de Micaela ahora es solo Estructura. El acumulado
+  // (margen + estructura + otros) se ve recién en "Resultado neto (sin inversiones)".
+  const resOpS=sumSerie(pg,meses,["ESTRUCTURA"]);
   const otrosS=sumSerie(pg,meses,["SERVICIOS"]);
-  const resNetoSinInvS=sumaSerie(resOpS,otrosS);
+  const resNetoSinInvS=sumaSerie(margenS,resOpS,otrosS);
   const invS=sumSerie(pg,meses,["INVERSIONES"]);
   const resNetoS=sumaSerie(resNetoSinInvS,invS);
   const bloques={margen:margenS,resOp:resOpS,otros:otrosS,resNetoSinInv:resNetoSinInvS,inversiones:invS,resNeto:resNetoS};
   const margen=totalSerie(margenS),resOp=totalSerie(resOpS),otros=totalSerie(otrosS),resNeto=totalSerie(resNetoS);
   document.getElementById("kpis").innerHTML=[
     ["Ventas",ventasBruto,"A) VENTA, bruto"],["Margen bruto",margen,"ventas − CMV de venta (A)"],
-    ["Resultado operativo",resOp,"margen − estructura (alquileres, sueldos, impuestos)"],["Resultado neto",resNeto,"incl. otros resultados (G,I,J) e inversiones (M), excl. P y Q"]
+    ["Resultado operativo",resOp,"estructura (alquileres, sueldos, impuestos)"],["Resultado neto",resNeto,"incl. otros resultados (G,I,J) e inversiones (M), excl. P y Q"]
   ].map(c=>`<div class="kpi"><div class="k-lbl">${c[0]}</div><div class="k-val" style="color:${c[1]>=0?"var(--income)":"var(--cost)"}">$ ${fmtM(c[1])}</div><div class="k-sub">${c[2]}</div></div>`).join("");
   renderTabla(pg,meses,bloques);
   try{renderCharts(pg,meses,bloques);}catch(e){console.warn("charts:",e);
@@ -496,7 +500,7 @@ function baseOpts(legend){
 const CHSEL_LBL={todo:"Todo (ingresos / gastos / resultado)",margen:"Margen bruto (Ventas)",resOp:"Resultado operativo",otros:"Otros resultados",resNetoSinInv:"Resultado neto (sin inversiones)",inversiones:"Inversiones",resNeto:"Resultado neto + inversiones"};
 // Qué bloques (sec) entran en cada opción del selector "Ver" -- misma lista que usan los
 // subtotales de la tabla (recompute()), así el gráfico de cada métrica siempre cuadra con su fila.
-const SECS_FOR={todo:["VENTAS","ESTRUCTURA","SERVICIOS","INVERSIONES"],margen:["VENTAS"],resOp:["VENTAS","ESTRUCTURA"],otros:["SERVICIOS"],resNetoSinInv:["VENTAS","ESTRUCTURA","SERVICIOS"],inversiones:["INVERSIONES"],resNeto:["VENTAS","ESTRUCTURA","SERVICIOS","INVERSIONES"]};
+const SECS_FOR={todo:["VENTAS","ESTRUCTURA","SERVICIOS","INVERSIONES"],margen:["VENTAS"],resOp:["ESTRUCTURA"],otros:["SERVICIOS"],resNetoSinInv:["VENTAS","ESTRUCTURA","SERVICIOS"],inversiones:["INVERSIONES"],resNeto:["VENTAS","ESTRUCTURA","SERVICIOS","INVERSIONES"]};
 function renderCharts(pg,meses,bloques){
   const labels=meses.map(mesLabel), sel=document.getElementById("chSel").value;
   if(chMes)chMes.destroy();
