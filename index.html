@@ -829,17 +829,20 @@ function renderPtoHist(){
 // larga pero se aplicaban sobre la lista corta -- el recorte caía fuera de rango y daba una lista
 // vacia, aunque el filtro de Grupo sí hubiera encontrado movimientos (bug real, detectado 2026-09-19).
 // Algunas cuentas de Apertura de Estructura se filtran por Grupo (Aux 02, ej. Alquileres: Estructura
-// vs Estructura NQN); otras -- "Cta Part Socios", que junta 8 cuentas reales (una por socio y
-// moneda) bajo una sola apertura -- se filtran por cuál cuenta real es, no por Aux 02 (que ahí no
-// dice nada útil). APERTURA_FILTRO_CAMPO elige, por cuenta virtual, qué campo de la transacción usa
-// ese filtro de arriba; default "grupo" si no está listada.
-const APERTURA_FILTRO_CAMPO={"Cta Part Socios":"cuenta"};
-function campoFiltroApertura(cuenta){ return APERTURA_FILTRO_CAMPO[cuenta]||"grupo"; }
-function etiquetaFiltroApertura(cuenta){ return campoFiltroApertura(cuenta)==="cuenta"?"Cuenta":"Grupo"; }
+// vs Estructura NQN); "Cta Part Socios" -- que junta las 8 cuentas reales de los socios (pesos y
+// USD) bajo una sola apertura -- se filtra por Socio, agrupando sus dos cuentas (pesos + USD) en una
+// sola opcion (a pedido de Micaela: "una visual por socio para ambas cuentas contables"). Aux 02 ahi
+// no dice nada util. APERTURA_FILTRO_FN elige, por cuenta virtual, como se calcula ese valor de
+// filtro a partir de la transaccion; default el Grupo (Aux 02) si no está listada.
+function nombreSocioDeCuenta(cuentaReal){
+  return (cuentaReal||"").replace(/^cta part\s*/i,"").replace(/\s*\(usd\)\s*$/i,"").trim();
+}
+const APERTURA_FILTRO_FN={"Cta Part Socios":t=>nombreSocioDeCuenta(t.cuenta)};
+function valorFiltroApertura(cuenta,t){ const fn=APERTURA_FILTRO_FN[cuenta]; return fn?fn(t):t.grupo; }
+function etiquetaFiltroApertura(cuenta){ return APERTURA_FILTRO_FN[cuenta]?"Socio":"Grupo"; }
 function mesesApertura(cuenta,filtroSel){
-  const campo=campoFiltroApertura(cuenta);
   const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
-  const todasT=filtroSel?todasTCuenta.filter(t=>normApertura(t[campo])===normApertura(filtroSel)):todasTCuenta;
+  const todasT=filtroSel?todasTCuenta.filter(t=>normApertura(valorFiltroApertura(cuenta,t))===normApertura(filtroSel)):todasTCuenta;
   return [...new Set(todasT.map(t=>t.mes))].sort();
 }
 function poblarMesesApertura(){
@@ -860,12 +863,11 @@ function ultimoAnioApertura(){
 window.ultimoAnioApertura=ultimoAnioApertura;
 function poblarGrupoApertura(){
   const cuenta=document.getElementById("paCuenta").value;
-  const campo=campoFiltroApertura(cuenta);
   const lbl=document.querySelector('label[for="paGrupo"]'); if(lbl) lbl.textContent=etiquetaFiltroApertura(cuenta);
   // Las opciones salen de los valores que realmente aparecen en los datos cargados (no de una lista
   // fija) -- asi el filtro siempre coincide exacto con lo que hay, sin depender de adivinar el string
   // tal cual esta escrito en el crudo de Tango.
-  const grupos=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t[campo]).filter(Boolean))].sort();
+  const grupos=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>valorFiltroApertura(cuenta,t)).filter(Boolean))].sort();
   const gsel=document.getElementById("paGrupo");
   const actual=gsel.value;
   gsel.innerHTML='<option value="">Todos</option>';
@@ -881,12 +883,12 @@ function poblarGrupoApertura(){
 // alrededor, asi un grupo vacio ("") o con espacios (" ") se nota a simple vista.
 function debugGruposPorConcepto(cuenta){
   const clasFn=CLASIF_APERTURA_FN[cuenta]; if(!clasFn) return {};
-  const campo=campoFiltroApertura(cuenta);
   const out={};
   (APERTURA_DETALLE[cuenta]||[]).forEach(t=>{
     const c=clasFn(t)||"Otros";
+    const v=valorFiltroApertura(cuenta,t);
     if(!out[c]) out[c]=new Set();
-    out[c].add(JSON.stringify(t[campo])+" ("+((t[campo]||"").length)+")");
+    out[c].add(JSON.stringify(v)+" ("+((v||"").length)+")");
   });
   return out;
 }
@@ -904,9 +906,8 @@ function renderPtoApertura(){
   const sel=document.getElementById("paCuenta"); if(!sel) return;
   const cuenta=sel.value;
   const grupoSel=document.getElementById("paGrupo").value;
-  const campoFiltro=campoFiltroApertura(cuenta);
   const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
-  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t[campoFiltro])===normApertura(grupoSel)):todasTCuenta;
+  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(valorFiltroApertura(cuenta,t))===normApertura(grupoSel)):todasTCuenta;
   const meses=mesesApertura(cuenta,grupoSel);
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   // Auto-repara los selects de mes si quedaron desactualizados (ej. recien subiste un crudo nuevo
@@ -1946,7 +1947,7 @@ function mergeEERRIntoData(res){
 // del crudo) que agrupa. Para la mayoria es un solo nombre, igual al de Presupuesto\u00B7Estructura; "Cta
 // Part Socios" es la excepcion -- agrupa las 8 cuentas particulares reales (una por socio, en pesos
 // y en USD) bajo una sola apertura, con el Modulo + Tipo comprobante como Concepto y la cuenta real
-// (socio/moneda) como filtro de arriba (ver APERTURA_FILTRO_CAMPO, CLASIF_APERTURA_FN mas abajo).
+// (agrupada por socio, no por cuenta puntual) como filtro de arriba (ver APERTURA_FILTRO_FN, CLASIF_APERTURA_FN mas abajo).
 const APERTURA_CUENTAS_MAP={
   "Alquileres":["Alquileres"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
@@ -2042,7 +2043,7 @@ const CLASIF_APERTURA_FN={
   // A pedido de Micaela ("quiero ver todo lo asociado a esas cuentas... con un detalle como este"):
   // el "Concepto" es Módulo + Tipo comprobante (ej. "Tesorería · CPS"), igual a como lo mostró en su
   // planilla de referencia. Qué cuenta real (socio/moneda) es, se filtra con el selector de arriba
-  // (ver APERTURA_FILTRO_CAMPO), no forma parte del Concepto.
+  // (ver APERTURA_FILTRO_FN), no forma parte del Concepto.
   "Cta Part Socios": t=>`${t.origen||"(sin módulo)"} · ${t.tipoComp||"(sin tipo)"}`
 };
 /* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
