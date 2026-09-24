@@ -1930,7 +1930,18 @@ function mergeEERRIntoData(res){
    (un espacio, mayus/minus) dejaba afuera del detalle transacciones reales sin ningun aviso -- ahora
    se admite cualquier grupo salvo el que se quiere excluir explicitamente, y el filtro "Grupo" de la
    pantalla (poblarGrupoApertura) se arma con los grupos que realmente aparecen en los datos. */
-const APERTURA_CUENTAS=["Alquileres","Ajustes Cuentas Corrientes"];
+// "Cuenta virtual" de Apertura de Estructura -> lista de nombres de cuenta REALES (columna "Cuenta"
+// del crudo) que agrupa. Para la mayoria es un solo nombre, igual al de Presupuesto\u00B7Estructura; "Cta
+// Part Socios" es la excepcion -- agrupa 4 cuentas reales distintas (una cuenta particular por socio
+// en Tango) bajo una sola apertura, cada una como su propio Concepto (ver CLASIF_APERTURA_FN).
+const APERTURA_CUENTAS_MAP={
+  "Alquileres":["Alquileres"],
+  "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
+  "Cta Part Socios":["Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela"]
+};
+const APERTURA_CUENTAS=Object.keys(APERTURA_CUENTAS_MAP);
+const APERTURA_CUENTA_REAL_A_VIRTUAL={};
+APERTURA_CUENTAS.forEach(v=>APERTURA_CUENTAS_MAP[v].forEach(real=>{APERTURA_CUENTA_REAL_A_VIRTUAL[real]=v;}));
 const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
@@ -1951,9 +1962,10 @@ function parseRawLedgerCuentas(rows){
     if(!cagg[k]) cagg[k]={};
     if(!cagg[k][y]) cagg[k][y]=[0,0,0,0];
     const a=cagg[k][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
-    if(APERTURA_CUENTAS.includes(cuenta) && !(APERTURA_GRUPOS_EXCLUIR[cuenta]||[]).some(g=>normApertura(g)===normApertura(grupo))){
-      if(!detalle[cuenta]) detalle[cuenta]=[];
-      detalle[cuenta].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,ars:Math.round(ars*100)/100});
+    const cuentaApertura=APERTURA_CUENTA_REAL_A_VIRTUAL[cuenta];
+    if(cuentaApertura && !(APERTURA_GRUPOS_EXCLUIR[cuentaApertura]||[]).some(g=>normApertura(g)===normApertura(grupo))){
+      if(!detalle[cuentaApertura]) detalle[cuentaApertura]=[];
+      detalle[cuentaApertura].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,cuenta,ars:Math.round(ars*100)/100});
     }
   }
   const out={};
@@ -2007,7 +2019,10 @@ const CLASIF_APERTURA_FN={
   },
   // A pedido de Micaela: acá el "Concepto" es directamente el módulo de Tango donde se originó el
   // movimiento (Compras, Ventas, ContaParam, Tesorería, etc.), no el proveedor ni ninguna otra regla.
-  "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)"
+  "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)",
+  // Acá el "Concepto" es el socio (la cuenta particular real de la que salió el movimiento, sin el
+  // prefijo "Cta part"), ya que "Cta Part Socios" junta 4 cuentas reales distintas en una apertura.
+  "Cta Part Socios": t=>(t.cuenta||"").replace(/^cta part\s*/i,"").trim()||"(sin socio)"
 };
 /* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
    de la apertura (ej. cada proveedor de Alquileres) tiene su propia vigencia -- necesario para casos
