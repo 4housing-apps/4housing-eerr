@@ -1003,7 +1003,7 @@ function renderPtoApertura(){
   // desplegable "Grupo" y cuantos registros encontro comparando contra eso, sobre el total de la
   // cuenta -- para confirmar en vivo, en el navegador real, si el filtro esta encontrando algo o no.
   const debugFiltro=`${etiquetaFiltroApertura(cuenta)} elegido: ${JSON.stringify(grupoSel)} (${grupoSel.length} caracteres) · coincidencias: ${todasT.length} de ${todasTCuenta.length} registros totales de "${esc(cuenta)}"`;
-  const notaResumen=cfgResumen?` Los conceptos vienen resumidos por Grupo (Estructura, Impuestos, Proveedores, Proveedores LDS, Ajustes Cuentas); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`:"";
+  const notaResumen=cfgResumen?` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`:"";
   document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
 }
@@ -2052,50 +2052,58 @@ const CLASIF_APERTURA_FN={
   "Cta Part Socios": t=>`${t.grupo||"(sin grupo)"} · ${t.origen||"(sin módulo)"} · ${t.tipoComp||"(sin tipo)"}`
 };
 // Para las cuentas cuyo Concepto es "Grupo · Módulo · Tipo comprobante" (ej. "Cta Part Socios"), la
-// tabla resume en una fila por Grupo (colapsada, con flecha para ver el detalle), en el orden que
-// pidió Micaela -- los conceptos ya vienen con el Grupo como primer segmento (separado por " · "),
-// asi que no hace falta reclasificar nada, solo separar ese prefijo.
+// tabla resume en una fila por "bucket" (colapsada, con flecha para ver el detalle), en el orden que
+// pidió Micaela. Un bucket puede juntar MAS DE UN Grupo/Aux 02 real -- ej. "Proveedores" junta
+// "P) PROVEEDORES" y "P) PROVEEDORES LDS" ("en proveedores pones todos los comprobantes que en Aux
+// 02 esten dentro de estas clasificaciones"). Un Aux 02 que no figura en ningun bucket configurado
+// se muestra aparte, con su propio código como etiqueta, al final (ordenado por importe) -- asi
+// aparece igual para los 4 socios sin tener que declarar cada variante (GP/MS/PS, etc.) a mano.
 const APERTURA_RESUMEN_GRUPO={
-  "Cta Part Socios":{
-    orden:["K) ESTRUCTURA","O) IMPUESTOS","P) PROVEEDORES","P) PROVEEDORES LDS","Q) AJUSTES CTAS"],
-    etiquetas:{"K) ESTRUCTURA":"Estructura","O) IMPUESTOS":"Impuestos","P) PROVEEDORES":"Proveedores","P) PROVEEDORES LDS":"Proveedores LDS","Q) AJUSTES CTAS":"Ajustes Cuentas"}
-  }
+  "Cta Part Socios":[
+    {label:"Estructura",grupos:["K) ESTRUCTURA"]},
+    {label:"Impuestos",grupos:["O) IMPUESTOS"]},
+    {label:"Proveedores",grupos:["P) PROVEEDORES","P) PROVEEDORES LDS"]},
+    {label:"Ajustes Cuentas",grupos:["Q) AJUSTES CTAS"]}
+  ]
 };
-// Que grupos estan expandidos (mostrando su detalle Módulo·Tipo comprobante) -- en memoria nomas, no
-// hace falta persistirlo: arranca todo colapsado, que es como Micaela pidio verlo por default.
+// Que buckets estan expandidos (mostrando su detalle) -- en memoria nomas, no hace falta persistirlo:
+// arranca todo colapsado, que es como Micaela pidio verlo por default.
 const APERTURA_RESUMEN_ABIERTO={};
-function toggleResumenApertura(cuenta,grupo){
-  const k=cuenta+"|"+grupo;
+function toggleResumenApertura(cuenta,bucket){
+  const k=cuenta+"|"+bucket;
   APERTURA_RESUMEN_ABIERTO[k]=!APERTURA_RESUMEN_ABIERTO[k];
   renderPtoApertura();
 }
 window.toggleResumenApertura=toggleResumenApertura;
 function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel){
-  const porGrupo={};
+  const codigoABucket={};
+  cfg.forEach((b,i)=>b.grupos.forEach(g=>{codigoABucket[g]=i;}));
+  const buckets=cfg.map(b=>({label:b.label,ars:0,n:0,porMes:{},hijos:[]}));
+  const extra={}; // codigo Aux 02 no configurado -> su propio bucket, con el codigo como label
   conceptos.forEach(k=>{
     const grupoReal=k.split(" · ")[0]||"(sin grupo)";
-    if(!porGrupo[grupoReal]) porGrupo[grupoReal]={ars:0,n:0,porMes:{},hijos:[]};
-    porGrupo[grupoReal].ars+=grupos[k].ars;
-    porGrupo[grupoReal].n+=grupos[k].n;
-    mesesSel.forEach(m=>{ porGrupo[grupoReal].porMes[m]=(porGrupo[grupoReal].porMes[m]||0)+(grupos[k].porMes[m]||0); });
-    porGrupo[grupoReal].hijos.push(k);
+    const idx=codigoABucket[grupoReal];
+    const dest=idx!=null?buckets[idx]:(extra[grupoReal]||(extra[grupoReal]={label:grupoReal,ars:0,n:0,porMes:{},hijos:[]}));
+    dest.ars+=grupos[k].ars;
+    dest.n+=grupos[k].n;
+    mesesSel.forEach(m=>{ dest.porMes[m]=(dest.porMes[m]||0)+(grupos[k].porMes[m]||0); });
+    dest.hijos.push(k);
   });
-  const ordenGrupos=[...cfg.orden.filter(g=>porGrupo[g]),...Object.keys(porGrupo).filter(g=>!cfg.orden.includes(g)).sort((a,b)=>porGrupo[b].ars-porGrupo[a].ars)];
-  const filas=ordenGrupos.map(g=>{
-    const info=porGrupo[g];
-    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+g];
+  const extraOrdenados=Object.values(extra).sort((a,b)=>b.ars-a.ars);
+  const todos=[...buckets.filter(b=>b.hijos.length),...extraOrdenados];
+  const filas=todos.map(info=>{
+    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+info.label];
     const cells=mesesSel.map(m=>{ const v=info.porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-    const gEsc=esc(g).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
-    const etiqueta=cfg.etiquetas[g]||g;
-    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${gEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
-    const filaResumen=`<tr class="result"><td class="fz fz1">${flecha}${esc(etiqueta)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
+    const lEsc=esc(info.label).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
+    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${lEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
+    const filaResumen=`<tr class="result"><td class="fz fz1">${flecha}${esc(info.label)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
     if(!abierto) return filaResumen;
-    const prefijo=g+" · ";
     const hijosOrdenados=info.hijos.slice().sort((a,b)=>grupos[b].ars-grupos[a].ars);
+    // El detalle muestra el Concepto completo (con el Grupo real, ej. "P) PROVEEDORES LDS · ..."),
+    // ya que un mismo bucket resumen puede juntar mas de un codigo Aux 02.
     const filasHijos=hijosOrdenados.map(k=>{
       const cellsH=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-      const etiquetaHijo=k.startsWith(prefijo)?k.slice(prefijo.length):k;
-      return `<tr><td class="fz fz1 ell" style="max-width:200px;padding-left:22px" title="${esc(k)}">${esc(etiquetaHijo)}</td>${cellsH}<td class="fzr" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+      return `<tr><td class="fz fz1 ell" style="max-width:220px;padding-left:22px" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
     }).join("");
     return filaResumen+filasHijos;
   }).join("");
