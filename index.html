@@ -828,9 +828,18 @@ function renderPtoHist(){
 // arranca despues que "Estructura"), los indices de Desde/Hasta quedaban calculados sobre la lista
 // larga pero se aplicaban sobre la lista corta -- el recorte caía fuera de rango y daba una lista
 // vacia, aunque el filtro de Grupo sí hubiera encontrado movimientos (bug real, detectado 2026-09-19).
-function mesesApertura(cuenta,grupoSel){
+// Algunas cuentas de Apertura de Estructura se filtran por Grupo (Aux 02, ej. Alquileres: Estructura
+// vs Estructura NQN); otras -- "Cta Part Socios", que junta 8 cuentas reales (una por socio y
+// moneda) bajo una sola apertura -- se filtran por cuál cuenta real es, no por Aux 02 (que ahí no
+// dice nada útil). APERTURA_FILTRO_CAMPO elige, por cuenta virtual, qué campo de la transacción usa
+// ese filtro de arriba; default "grupo" si no está listada.
+const APERTURA_FILTRO_CAMPO={"Cta Part Socios":"cuenta"};
+function campoFiltroApertura(cuenta){ return APERTURA_FILTRO_CAMPO[cuenta]||"grupo"; }
+function etiquetaFiltroApertura(cuenta){ return campoFiltroApertura(cuenta)==="cuenta"?"Cuenta":"Grupo"; }
+function mesesApertura(cuenta,filtroSel){
+  const campo=campoFiltroApertura(cuenta);
   const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
-  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t.grupo)===normApertura(grupoSel)):todasTCuenta;
+  const todasT=filtroSel?todasTCuenta.filter(t=>normApertura(t[campo])===normApertura(filtroSel)):todasTCuenta;
   return [...new Set(todasT.map(t=>t.mes))].sort();
 }
 function poblarMesesApertura(){
@@ -851,18 +860,19 @@ function ultimoAnioApertura(){
 window.ultimoAnioApertura=ultimoAnioApertura;
 function poblarGrupoApertura(){
   const cuenta=document.getElementById("paCuenta").value;
-  // Las opciones salen de los grupos que realmente aparecen en los datos cargados (no de una lista
+  const campo=campoFiltroApertura(cuenta);
+  const lbl=document.querySelector('label[for="paGrupo"]'); if(lbl) lbl.textContent=etiquetaFiltroApertura(cuenta);
+  // Las opciones salen de los valores que realmente aparecen en los datos cargados (no de una lista
   // fija) -- asi el filtro siempre coincide exacto con lo que hay, sin depender de adivinar el string
   // tal cual esta escrito en el crudo de Tango.
-  const grupos=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t.grupo).filter(Boolean))].sort();
+  const grupos=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>t[campo]).filter(Boolean))].sort();
   const gsel=document.getElementById("paGrupo");
   const actual=gsel.value;
   gsel.innerHTML='<option value="">Todos</option>';
-  // Si hay dos Grupos que a simple vista dicen lo mismo pero son valores distintos (ej. un espacio o
-  // caracter invisible de diferencia en el crudo), se van a ver como dos opciones separadas -- el
-  // "(N)" al final es la cantidad de caracteres de cada uno, para poder notar la diferencia aunque no
-  // se vea a simple vista. Si para una cuenta todos los Grupos miden igual, es un buen indicio de que
-  // el problema no es un caracter invisible sino otra cosa.
+  // Si hay dos opciones que a simple vista dicen lo mismo pero son valores distintos (ej. un espacio
+  // o caracter invisible de diferencia en el crudo), se van a ver como dos opciones separadas -- el
+  // "(N)" al final es la cantidad de caracteres de cada una, para poder notar la diferencia aunque no
+  // se vea a simple vista. Si todas miden igual, es un buen indicio de que el problema es otra cosa.
   grupos.forEach(g=>gsel.add(new Option(g+" ("+g.length+")",g)));
   if(grupos.includes(actual)) gsel.value=actual;
 }
@@ -871,11 +881,12 @@ function poblarGrupoApertura(){
 // alrededor, asi un grupo vacio ("") o con espacios (" ") se nota a simple vista.
 function debugGruposPorConcepto(cuenta){
   const clasFn=CLASIF_APERTURA_FN[cuenta]; if(!clasFn) return {};
+  const campo=campoFiltroApertura(cuenta);
   const out={};
   (APERTURA_DETALLE[cuenta]||[]).forEach(t=>{
     const c=clasFn(t)||"Otros";
     if(!out[c]) out[c]=new Set();
-    out[c].add(JSON.stringify(t.grupo)+" ("+((t.grupo||"").length)+")");
+    out[c].add(JSON.stringify(t[campo])+" ("+((t[campo]||"").length)+")");
   });
   return out;
 }
@@ -893,8 +904,9 @@ function renderPtoApertura(){
   const sel=document.getElementById("paCuenta"); if(!sel) return;
   const cuenta=sel.value;
   const grupoSel=document.getElementById("paGrupo").value;
+  const campoFiltro=campoFiltroApertura(cuenta);
   const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
-  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t.grupo)===normApertura(grupoSel)):todasTCuenta;
+  const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(t[campoFiltro])===normApertura(grupoSel)):todasTCuenta;
   const meses=mesesApertura(cuenta,grupoSel);
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
   // Auto-repara los selects de mes si quedaron desactualizados (ej. recien subiste un crudo nuevo
@@ -985,8 +997,8 @@ function renderPtoApertura(){
   // Diagnostico del propio filtro (no solo de los datos): que valor exacto quedo elegido en el
   // desplegable "Grupo" y cuantos registros encontro comparando contra eso, sobre el total de la
   // cuenta -- para confirmar en vivo, en el navegador real, si el filtro esta encontrando algo o no.
-  const debugFiltro=`grupoSel elegido: ${JSON.stringify(grupoSel)} (${grupoSel.length} caracteres) · coincidencias: ${todasT.length} de ${todasTCuenta.length} registros totales de "${esc(cuenta)}"`;
-  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">Grupo real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span>`;
+  const debugFiltro=`${etiquetaFiltroApertura(cuenta)} elegido: ${JSON.stringify(grupoSel)} (${grupoSel.length} caracteres) · coincidencias: ${todasT.length} de ${todasTCuenta.length} registros totales de "${esc(cuenta)}"`;
+  document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta. La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
 }
 // Segunda tabla: Pto de CADA concepto mes a mes (no el real) -- muestra como se compone el Pto
@@ -1932,16 +1944,23 @@ function mergeEERRIntoData(res){
    pantalla (poblarGrupoApertura) se arma con los grupos que realmente aparecen en los datos. */
 // "Cuenta virtual" de Apertura de Estructura -> lista de nombres de cuenta REALES (columna "Cuenta"
 // del crudo) que agrupa. Para la mayoria es un solo nombre, igual al de Presupuesto\u00B7Estructura; "Cta
-// Part Socios" es la excepcion -- agrupa 4 cuentas reales distintas (una cuenta particular por socio
-// en Tango) bajo una sola apertura, cada una como su propio Concepto (ver CLASIF_APERTURA_FN).
+// Part Socios" es la excepcion -- agrupa las 8 cuentas particulares reales (una por socio, en pesos
+// y en USD) bajo una sola apertura, con el Modulo + Tipo comprobante como Concepto y la cuenta real
+// (socio/moneda) como filtro de arriba (ver APERTURA_FILTRO_CAMPO, CLASIF_APERTURA_FN mas abajo).
 const APERTURA_CUENTAS_MAP={
   "Alquileres":["Alquileres"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
-  "Cta Part Socios":["Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela"]
+  "Cta Part Socios":[
+    "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
+    "Cta part Seoane Leandro (USD)","Cta part Pedretti Gustavo (USD)","Cta part Spinetto Pablo (USD)","Cta part Seoane Micaela (USD)"
+  ]
 };
 const APERTURA_CUENTAS=Object.keys(APERTURA_CUENTAS_MAP);
+// Indice inverso normalizado (no exacto): el crudo trae espacios inconsistentes en algunos nombres
+// de cuenta (ej. "Spinetto Pablo  (USD)", con doble espacio) -- normApertura ya resuelve ese tipo de
+// diferencia en todas las demas comparaciones de esta pantalla, asi que se usa tambien aca.
 const APERTURA_CUENTA_REAL_A_VIRTUAL={};
-APERTURA_CUENTAS.forEach(v=>APERTURA_CUENTAS_MAP[v].forEach(real=>{APERTURA_CUENTA_REAL_A_VIRTUAL[real]=v;}));
+APERTURA_CUENTAS.forEach(v=>APERTURA_CUENTAS_MAP[v].forEach(real=>{APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(real)]=v;}));
 const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
@@ -1962,7 +1981,7 @@ function parseRawLedgerCuentas(rows){
     if(!cagg[k]) cagg[k]={};
     if(!cagg[k][y]) cagg[k][y]=[0,0,0,0];
     const a=cagg[k][y]; a[0]+=ars; a[1]+=usdOfic; a[2]+=usdBill; a[3]+=axi;
-    const cuentaApertura=APERTURA_CUENTA_REAL_A_VIRTUAL[cuenta];
+    const cuentaApertura=APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(cuenta)];
     if(cuentaApertura && !(APERTURA_GRUPOS_EXCLUIR[cuentaApertura]||[]).some(g=>normApertura(g)===normApertura(grupo))){
       if(!detalle[cuentaApertura]) detalle[cuentaApertura]=[];
       detalle[cuentaApertura].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,cuenta,ars:Math.round(ars*100)/100});
@@ -2020,9 +2039,11 @@ const CLASIF_APERTURA_FN={
   // A pedido de Micaela: acá el "Concepto" es directamente el módulo de Tango donde se originó el
   // movimiento (Compras, Ventas, ContaParam, Tesorería, etc.), no el proveedor ni ninguna otra regla.
   "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)",
-  // Acá el "Concepto" es el socio (la cuenta particular real de la que salió el movimiento, sin el
-  // prefijo "Cta part"), ya que "Cta Part Socios" junta 4 cuentas reales distintas en una apertura.
-  "Cta Part Socios": t=>(t.cuenta||"").replace(/^cta part\s*/i,"").trim()||"(sin socio)"
+  // A pedido de Micaela ("quiero ver todo lo asociado a esas cuentas... con un detalle como este"):
+  // el "Concepto" es Módulo + Tipo comprobante (ej. "Tesorería · CPS"), igual a como lo mostró en su
+  // planilla de referencia. Qué cuenta real (socio/moneda) es, se filtra con el selector de arriba
+  // (ver APERTURA_FILTRO_CAMPO), no forma parte del Concepto.
+  "Cta Part Socios": t=>`${t.origen||"(sin módulo)"} · ${t.tipoComp||"(sin tipo)"}`
 };
 /* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
    de la apertura (ej. cada proveedor de Alquileres) tiene su propia vigencia -- necesario para casos
