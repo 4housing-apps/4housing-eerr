@@ -2040,11 +2040,11 @@ const CLASIF_APERTURA_FN={
   // A pedido de Micaela: acá el "Concepto" es directamente el módulo de Tango donde se originó el
   // movimiento (Compras, Ventas, ContaParam, Tesorería, etc.), no el proveedor ni ninguna otra regla.
   "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)",
-  // A pedido de Micaela ("quiero ver todo lo asociado a esas cuentas... con un detalle como este"):
-  // el "Concepto" es Módulo + Tipo comprobante (ej. "Tesorería · CPS"), igual a como lo mostró en su
-  // planilla de referencia. Qué cuenta real (socio/moneda) es, se filtra con el selector de arriba
-  // (ver APERTURA_FILTRO_FN), no forma parte del Concepto.
-  "Cta Part Socios": t=>`${t.origen||"(sin módulo)"} · ${t.tipoComp||"(sin tipo)"}`
+  // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
+  // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
+  // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
+  // Qué cuenta real (socio/moneda) es, se filtra aparte con el selector de arriba (APERTURA_FILTRO_FN).
+  "Cta Part Socios": t=>`${t.grupo||"(sin grupo)"} · ${t.origen||"(sin módulo)"} · ${t.tipoComp||"(sin tipo)"}`
 };
 /* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
    de la apertura (ej. cada proveedor de Alquileres) tiene su propia vigencia -- necesario para casos
