@@ -2141,10 +2141,8 @@ function moverConceptoApertura(cuenta,concepto,dir){
 }
 window.moverConceptoApertura=moverConceptoApertura;
 // Leyenda -> Definicion que paso Micaela para "Movilidad Combustible": cada codigo de proveedor
-// (columna "Leyenda" del crudo) se agrupa bajo su categoria de gasto. OJO: "PANAME" aparece dos veces
-// en la lista que me pas\u00F3 (Combustible Y Remises) -- dejo Combustible (la primera vez que aparece),
-// pero avisame cual es el correcto y lo corrijo, porque tal como est\u00E1, un PANAME que en realidad sea
-// un remis se va a contar como combustible.
+// (columna "Leyenda" del crudo) se agrupa bajo su categoria de gasto. PANAME es Combustible
+// (confirmado -- en la lista original aparecia tambien como Remises por error de tipeo).
 const APERTURA_PROVEEDOR_CATEGORIA_MOVILIDAD={
   "PANAME":"Combustible","DEHE":"Combustible","ANGELA":"Combustible","OESE":"Combustible",
   "FGCFUE":"Combustible","MANHER":"Combustible","EDENRE":"Combustible","SERVIN":"Combustible",
