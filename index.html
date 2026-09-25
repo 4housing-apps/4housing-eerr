@@ -2240,12 +2240,16 @@ const APERTURA_PTO_SEED={
     "BERGER":[{desde:"2026-04",pto:1400000}],
     "Expensas Of. CABA":[{desde:"2026-04",pto:730000}]
   },
-  // A pedido de Micaela: Edesur (K) ESTRUCTURA, CABA) y EPEN (K) ESTRUCTURA NQN, Neuquén) desde
-  // abril/2026 -- igual que Alquileres, cada proveedor tiene su propio Pto y se filtra por Grupo
-  // (Todos / Estructura / Estructura NQN) con el mecanismo ya existente (aperturaPtoGrupoDe).
+  // A pedido de Micaela: el Pto de Energía es por Aux 02 (Grupo), NO por proveedor -- "generalmente
+  // es Edesur/EPEN, pero puede haber otros gastos" dentro del mismo Aux 02, y todos tienen que
+  // contemplarse contra el mismo presupuesto. Por eso la clave es directamente el código de Aux 02
+  // ("K) ESTRUCTURA" = Edesur/CABA, "K) ESTRUCTURA NQN" = EPEN/Neuquén), no el nombre del proveedor.
+  // Como esa clave no coincide con ningún Concepto real (Concepto acá es proveedor o módulo, nunca el
+  // Aux 02), el filtro por Grupo no la encontraría por el criterio viejo (aperturaPtoGrupoDe, que
+  // infiere el Aux 02 comparando texto contra el Concepto) -- se declara a mano en APERTURA_PTO_FILTRO.
   "Energía":{
-    "EDESUR":[{desde:"2026-04",pto:100000}],
-    "EPEN":[{desde:"2026-04",pto:400000}]
+    "K) ESTRUCTURA":[{desde:"2026-04",pto:100000}],
+    "K) ESTRUCTURA NQN":[{desde:"2026-04",pto:400000}]
   },
   // A pedido de Micaela: el único gasto de "Cta Part Socios" con presupuesto propio es el Autónomos de
   // Estructura, $310.000 por socio desde abril/2026 (mismo monto para los 4). Impuestos, Proveedores y
@@ -2268,6 +2272,12 @@ const APERTURA_PTO_FILTRO={
     "Seoane Leandro · Estructura (Autónomos)":"Seoane Leandro",
     "Seoane Micaela · Estructura (Autónomos)":"Seoane Micaela",
     "Spinetto Pablo · Estructura (Autónomos)":"Spinetto Pablo"
+  },
+  // La clave del Pto de Energía YA es el código de Aux 02 -- mapeo identidad, solo para que
+  // aperturaPtoFiltroDe la encuentre sin pasar por el criterio viejo (que no aplica acá).
+  "Energía":{
+    "K) ESTRUCTURA":"K) ESTRUCTURA",
+    "K) ESTRUCTURA NQN":"K) ESTRUCTURA NQN"
   }
 };
 // A pedido de Micaela: "solo Estructura e Impuestos debiera... usarse de base de cálculo para
