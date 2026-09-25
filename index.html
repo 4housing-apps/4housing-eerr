@@ -1991,6 +1991,7 @@ function mergeEERRIntoData(res){
 // (agrupada por socio, no por cuenta puntual) como filtro de arriba (ver APERTURA_FILTRO_FN, CLASIF_APERTURA_FN mas abajo).
 const APERTURA_CUENTAS_MAP={
   "Alquileres":["Alquileres"],
+  "Energía":["Energía Electrica"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
@@ -2081,6 +2082,10 @@ const CLASIF_APERTURA_FN={
   // A pedido de Micaela: acá el "Concepto" es directamente el módulo de Tango donde se originó el
   // movimiento (Compras, Ventas, ContaParam, Tesorería, etc.), no el proveedor ni ninguna otra regla.
   "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)",
+  // A pedido de Micaela, funciona parecido a Alquileres: lo que viene de Compras se abre por
+  // proveedor (Edesur, EPEN, etc.); el resto de los módulos se agrupa solo por módulo (sin desglosar
+  // por proveedor), a diferencia de Alquileres que tira todo lo que no es Compras/Expensas a "Otros".
+  "Energía": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
@@ -2234,6 +2239,13 @@ const APERTURA_PTO_SEED={
     "SPWORK":[{desde:"2026-04",pto:7050000}],
     "BERGER":[{desde:"2026-04",pto:1400000}],
     "Expensas Of. CABA":[{desde:"2026-04",pto:730000}]
+  },
+  // A pedido de Micaela: Edesur (K) ESTRUCTURA, CABA) y EPEN (K) ESTRUCTURA NQN, Neuquén) desde
+  // abril/2026 -- igual que Alquileres, cada proveedor tiene su propio Pto y se filtra por Grupo
+  // (Todos / Estructura / Estructura NQN) con el mecanismo ya existente (aperturaPtoGrupoDe).
+  "Energía":{
+    "EDESUR":[{desde:"2026-04",pto:100000}],
+    "EPEN":[{desde:"2026-04",pto:400000}]
   },
   // A pedido de Micaela: el único gasto de "Cta Part Socios" con presupuesto propio es el Autónomos de
   // Estructura, $310.000 por socio desde abril/2026 (mismo monto para los 4). Impuestos, Proveedores y
