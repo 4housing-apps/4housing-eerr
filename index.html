@@ -948,7 +948,7 @@ function renderPtoApertura(){
   const grupos={};
   txs.forEach(t=>{
     const concepto=clasFn(t)||"Otros";
-    if(!grupos[concepto]) grupos[concepto]={ars:0,n:0,porMes:{}};
+    if(!grupos[concepto]) grupos[concepto]={ars:0,n:0,porMes:{},esProveedor:t.origen==="Compras"};
     grupos[concepto].ars+=t.ars;grupos[concepto].n++;
     grupos[concepto].porMes[t.mes]=(grupos[concepto].porMes[t.mes]||0)+t.ars;
   });
@@ -964,11 +964,14 @@ function renderPtoApertura(){
   const colTotBase=mesesSel.map((m,i)=>conceptosBase.reduce((s,k)=>s+(grupos[k].porMes[m]||0),0));
   const cfgResumen=APERTURA_RESUMEN_GRUPO[cuenta];
   const porCuentaReal=APERTURA_RESUMEN_POR_CUENTA_REAL[cuenta];
+  const topProveedores=APERTURA_TOP_PROVEEDORES[cuenta];
   const filaVacia=`<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
   const rowsHtml=(cfgResumen&&porCuentaReal
     ? filasAperturaPorCuentaReal(cuenta,cfgResumen,txs,clasFn,mesesSel)
     : cfgResumen
     ? filasAperturaResumenPorGrupo(cuenta,cfgResumen,grupos,conceptos,mesesSel)
+    : topProveedores
+    ? filasAperturaTopProveedores(cuenta,grupos,conceptos,mesesSel,topProveedores)
     : conceptos.map((k,idx)=>{
         const cells=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
         const kEsc=esc(k).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
@@ -1037,9 +1040,11 @@ function renderPtoApertura(){
   // desplegable "Grupo" y cuantos registros encontro comparando contra eso, sobre el total de la
   // cuenta -- para confirmar en vivo, en el navegador real, si el filtro esta encontrando algo o no.
   const debugFiltro=`${etiquetaFiltroApertura(cuenta)} elegido: ${JSON.stringify(grupoSel)} (${grupoSel.length} caracteres) · coincidencias: ${todasT.length} de ${todasTCuenta.length} registros totales de "${esc(cuenta)}"`;
-  const notaResumen=!cfgResumen?"":porCuentaReal
+  const notaResumen=cfgResumen?(porCuentaReal
     ?` Primero se abre por cuenta contable real (pesos y USD, nunca mezcladas), luego por Grupo (${cfgResumen.map(b=>b.label).join(", ")}), luego por Módulo y Tipo de comprobante — hacé clic en cada flecha para ver el siguiente nivel.`
-    :` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`;
+    :` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`)
+    :topProveedores?` Se muestran los ${topProveedores} proveedores con más movimiento; el resto se suma en "Otros" (hacé clic en la flecha para ver el detalle) y, más abajo, el resto de los módulos sin desglosar por proveedor.`
+    :"";
   document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
 }
@@ -2005,6 +2010,7 @@ function mergeEERRIntoData(res){
 const APERTURA_CUENTAS_MAP={
   "Alquileres":["Alquileres"],
   "Energía":["Energía Electrica"],
+  "Food & Bev":["Food & Bev"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
@@ -2099,6 +2105,9 @@ const CLASIF_APERTURA_FN={
   // proveedor (Edesur, EPEN, etc.); el resto de los módulos se agrupa solo por módulo (sin desglosar
   // por proveedor), a diferencia de Alquileres que tira todo lo que no es Compras/Expensas a "Otros".
   "Energía": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  // Misma regla que Energía (Compras -> proveedor, resto -> módulo); acá ademas se colapsan los
+  // proveedores fuera del top N en una fila "Otros" (ver APERTURA_TOP_PROVEEDORES), porque son muchos.
+  "Food & Bev": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
@@ -2234,6 +2243,35 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
   }).join("");
   return filas||"";
 }
+// Cuentas con muchos proveedores distintos (ej. "Food & Bev"): a pedido de Micaela, Compras se abre
+// por proveedor como siempre, pero solo se listan los N con mas movimiento -- el resto se junta en
+// una fila "Otros" colapsable (misma flecha que los buckets de Grupo). Los conceptos que no son de
+// Compras (el resto de los modulos) se muestran aparte, abajo, sin desglosar mas.
+const APERTURA_TOP_PROVEEDORES={"Food & Bev":25};
+function filasAperturaTopProveedores(cuenta,grupos,conceptos,mesesSel,topN){
+  // "conceptos" ya viene ordenado por importe descendente (resolverOrdenApertura), asi que separar
+  // proveedores de modulos preservando ese orden alcanza para tomar el top N tal cual.
+  const proveedores=conceptos.filter(k=>grupos[k].esProveedor);
+  const modulos=conceptos.filter(k=>!grupos[k].esProveedor);
+  const top=proveedores.slice(0,topN), resto=proveedores.slice(topN);
+  const filaConcepto=(k,indent)=>{
+    const cells=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    return `<tr><td class="fz fz1 ell" style="max-width:none${indent?";padding-left:22px":""}" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+  };
+  let html=top.map(k=>filaConcepto(k,false)).join("");
+  if(resto.length){
+    const claveOtros="__otros_proveedores__";
+    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveOtros];
+    const cEsc=esc(cuenta).replace(/'/g,"\\'");
+    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${claveOtros}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
+    const totalOtros=resto.reduce((s,k)=>s+grupos[k].ars,0), nOtros=resto.reduce((s,k)=>s+grupos[k].n,0);
+    const cellsOtros=mesesSel.map(m=>{ const v=resto.reduce((s,k)=>s+(grupos[k].porMes[m]||0),0); return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    html+=`<tr class="result"><td class="fz fz1"><b>${flecha}Otros (${resto.length} proveedores)</b></td>${cellsOtros}<td class="fzr${signoCls(totalOtros)}" style="text-align:right"><b>${fmt(totalOtros)}</b></td><td class="fzr mut" style="text-align:right">${nOtros}</td></tr>`;
+    if(abierto) html+=resto.map(k=>filaConcepto(k,true)).join("");
+  }
+  html+=modulos.map(k=>filaConcepto(k,false)).join("");
+  return html;
+}
 /* Pto de Apertura de Estructura: a diferencia de OVERRIDES (un Pto por CUENTA), aca cada "Concepto"
    de la apertura (ej. cada proveedor de Alquileres) tiene su propia vigencia -- necesario para casos
    como "a partir de julio se compra el terreno y ese alquiler puntual deja de existir" sin tocar el
@@ -2272,6 +2310,13 @@ const APERTURA_PTO_SEED={
     "Seoane Leandro · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}],
     "Seoane Micaela · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}],
     "Spinetto Pablo · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}]
+  },
+  // A pedido de Micaela, adjunto de su planilla: Food & Bev Oficina ($5.538.800) + Taller
+  // ($1.995.200) = $7.534.000 para "K) ESTRUCTURA" (CABA); $1.250.000 para "K) ESTRUCTURA NQN"
+  // (Neuquén). Igual que Energía, el Pto es por Aux 02, no por proveedor puntual.
+  "Food & Bev":{
+    "K) ESTRUCTURA":[{desde:"2026-04",pto:7534000}],
+    "K) ESTRUCTURA NQN":[{desde:"2026-04",pto:1250000}]
   }
 };
 // A que socio pertenece cada Pto de "Cta Part Socios" -- a diferencia de aperturaPtoGrupoDe (que
@@ -2289,6 +2334,10 @@ const APERTURA_PTO_FILTRO={
   // La clave del Pto de Energía YA es el código de Aux 02 -- mapeo identidad, solo para que
   // aperturaPtoFiltroDe la encuentre sin pasar por el criterio viejo (que no aplica acá).
   "Energía":{
+    "K) ESTRUCTURA":"K) ESTRUCTURA",
+    "K) ESTRUCTURA NQN":"K) ESTRUCTURA NQN"
+  },
+  "Food & Bev":{
     "K) ESTRUCTURA":"K) ESTRUCTURA",
     "K) ESTRUCTURA NQN":"K) ESTRUCTURA NQN"
   }
