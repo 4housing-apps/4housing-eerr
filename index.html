@@ -1271,7 +1271,7 @@ function colResizeApplySaved(table){
   if(!saved) return;
   const ths=[...table.querySelectorAll('thead th')];
   table.style.tableLayout='fixed';
-  ths.forEach((th,i)=>{ if(saved[i]) th.style.width=saved[i]+'px'; });
+  ths.forEach((th,i)=>{ if(saved[i]){ th.style.width=saved[i]+'px'; th.style.maxWidth='none'; } });
 }
 function colResizeSave(table, ths){
   const widths={}; ths.forEach((th,i)=>{ const w=parseInt(th.style.width,10); if(w) widths[i]=w; });
@@ -1293,6 +1293,7 @@ function colResizeInit(table){
         ths.forEach(t=>{ t.style.width=t.getBoundingClientRect().width+'px'; });
         table.style.tableLayout='fixed';
       }
+      th.style.maxWidth='none';
       r.classList.add('active');
       COLRESIZE_DRAG={ th, r, table, ths, startX:e.clientX, startW:th.getBoundingClientRect().width };
       document.body.style.cursor='col-resize'; document.body.style.userSelect='none';
