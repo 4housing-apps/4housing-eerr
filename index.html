@@ -2063,11 +2063,22 @@ const CLASIF_APERTURA_FN={
 // 02 esten dentro de estas clasificaciones"). Un Aux 02 que no figura en ningun bucket configurado
 // se muestra aparte, con su propio código como etiqueta, al final (ordenado por importe) -- asi
 // aparece igual para los 4 socios sin tener que declarar cada variante (GP/MS/PS, etc.) a mano.
+// "Proveedores" se define por PREFIJO, no por una lista de códigos: cada socio tiene su propia
+// variante (LDS para Seoane Leandro, GP para Pedretti Gustavo, MS para Seoane Micaela, PS para
+// Spinetto Pablo -- son iniciales del socio) además de la genérica "P) PROVEEDORES" -- a pedido de
+// Micaela, todas entran en el mismo bucket "Proveedores", para cualquier socio, sin tener que listar
+// cada variante a mano.
+function bucketMatch(b,grupoReal){
+  const ng=normApertura(grupoReal);
+  if(b.grupos) return b.grupos.some(g=>normApertura(g)===ng);
+  if(b.prefijo) return ng.startsWith(normApertura(b.prefijo));
+  return false;
+}
 const APERTURA_RESUMEN_GRUPO={
   "Cta Part Socios":[
     {label:"Estructura",grupos:["K) ESTRUCTURA"]},
     {label:"Impuestos",grupos:["O) IMPUESTOS"]},
-    {label:"Proveedores",grupos:["P) PROVEEDORES","P) PROVEEDORES LDS"]},
+    {label:"Proveedores",prefijo:"P) PROVEEDORES"},
     {label:"Ajustes Cuentas",grupos:["Q) AJUSTES CTAS"]}
   ]
 };
@@ -2087,14 +2098,17 @@ function toggleResumenApertura(cuenta,bucket){
 window.toggleResumenApertura=toggleResumenApertura;
 function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefijoClave){
   prefijoClave=prefijoClave||"";
-  const codigoABucket={};
-  cfg.forEach((b,i)=>b.grupos.forEach(g=>{codigoABucket[g]=i;}));
+  // Cuando esta anidado adentro de una cuenta real (prefijoClave truthy), se indenta un escalón más
+  // que cuando es el primer nivel -- para que se note a simple vista que "Estructura" está DENTRO de
+  // "Cta part Pedretti Gustavo", no al mismo nivel.
+  const identBucket=prefijoClave?"padding-left:22px":"";
+  const identHijo=prefijoClave?"padding-left:44px":"padding-left:22px";
   const buckets=cfg.map(b=>({label:b.label,ars:0,n:0,porMes:{},hijos:[]}));
   const extra={}; // codigo Aux 02 no configurado -> su propio bucket, con el codigo como label
   conceptos.forEach(k=>{
     const grupoReal=k.split(" · ")[0]||"(sin grupo)";
-    const idx=codigoABucket[grupoReal];
-    const dest=idx!=null?buckets[idx]:(extra[grupoReal]||(extra[grupoReal]={label:grupoReal,ars:0,n:0,porMes:{},hijos:[]}));
+    const idx=cfg.findIndex(b=>bucketMatch(b,grupoReal));
+    const dest=idx>=0?buckets[idx]:(extra[grupoReal]||(extra[grupoReal]={label:grupoReal,ars:0,n:0,porMes:{},hijos:[]}));
     dest.ars+=grupos[k].ars;
     dest.n+=grupos[k].n;
     mesesSel.forEach(m=>{ dest.porMes[m]=(dest.porMes[m]||0)+(grupos[k].porMes[m]||0); });
@@ -2110,14 +2124,14 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefi
     const cells=mesesSel.map(m=>{ const v=info.porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
     const bEsc=esc(claveBucket).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${bEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
-    const filaResumen=`<tr class="result"><td class="fz fz1">${flecha}${esc(info.label)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
+    const filaResumen=`<tr class="result"><td class="fz fz1" style="${identBucket}">${flecha}${esc(info.label)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
     if(!abierto) return filaResumen;
     const hijosOrdenados=info.hijos.slice().sort((a,b)=>grupos[b].ars-grupos[a].ars);
     // El detalle muestra el Concepto completo (con el Grupo real, ej. "P) PROVEEDORES LDS · ..."),
     // ya que un mismo bucket resumen puede juntar mas de un codigo Aux 02.
     const filasHijos=hijosOrdenados.map(k=>{
       const cellsH=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-      return `<tr><td class="fz fz1 ell" style="max-width:220px;padding-left:22px" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+      return `<tr><td class="fz fz1 ell" style="max-width:220px;${identHijo}" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
     }).join("");
     return filaResumen+filasHijos;
   }).join("");
