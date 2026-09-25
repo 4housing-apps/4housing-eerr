@@ -775,7 +775,7 @@ function cuentaNombrePorKey(key){ const c=CONFIG_PTO.find(x=>x.key===key); retur
 function conceptosDeApertura(cuenta){
   const clasFn=CLASIF_APERTURA_FN[cuenta]; if(!clasFn) return [];
   const set=new Set();
-  (APERTURA_DETALLE[cuenta]||[]).forEach(t=>set.add(clasFn(t)||"Otros"));
+  detalleAperturaCuenta(cuenta).forEach(t=>set.add(clasFn(t)||"Otros"));
   Object.keys(APERTURA_PTO[cuenta]||{}).forEach(k=>set.add(k));
   return [...set].sort();
 }
@@ -845,8 +845,20 @@ function nombreSocioDeCuenta(cuentaReal){
 const APERTURA_FILTRO_FN={"Cta Part Socios":t=>nombreSocioDeCuenta(t.cuenta)};
 function valorFiltroApertura(cuenta,t){ const fn=APERTURA_FILTRO_FN[cuenta]; return fn?fn(t):t.grupo; }
 function etiquetaFiltroApertura(cuenta){ return APERTURA_FILTRO_FN[cuenta]?"Socio":"Grupo"; }
+// Todas las transacciones de "cuenta" ya sin las que estan excluidas por Aux 02 (APERTURA_GRUPOS_EXCLUIR).
+// Se aplica siempre que se lee APERTURA_DETALLE para esta pantalla -- asi una exclusion nueva (o
+// cambiada) se ve al toque en Grupo/meses/tabla/Pto, sin depender de volver a subir el crudo (el
+// filtro que hace parseRawLedgerCuentas al guardar solo corre de nuevo cuando se sube un archivo
+// nuevo; los datos ya guardados de antes de esa exclusion se quedan como estaban hasta que se filtran
+// aca tambien).
+function detalleAperturaCuenta(cuenta){
+  const excl=APERTURA_GRUPOS_EXCLUIR[cuenta];
+  const todo=APERTURA_DETALLE[cuenta]||[];
+  if(!excl||!excl.length) return todo;
+  return todo.filter(t=>!excl.some(g=>normApertura(g)===normApertura(t.grupo)));
+}
 function mesesApertura(cuenta,filtroSel){
-  const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
+  const todasTCuenta=detalleAperturaCuenta(cuenta);
   const todasT=filtroSel?todasTCuenta.filter(t=>normApertura(valorFiltroApertura(cuenta,t))===normApertura(filtroSel)):todasTCuenta;
   return [...new Set(todasT.map(t=>t.mes))].sort();
 }
@@ -872,7 +884,7 @@ function poblarGrupoApertura(){
   // Las opciones salen de los valores que realmente aparecen en los datos cargados (no de una lista
   // fija) -- asi el filtro siempre coincide exacto con lo que hay, sin depender de adivinar el string
   // tal cual esta escrito en el crudo de Tango.
-  const grupos=[...new Set((APERTURA_DETALLE[cuenta]||[]).map(t=>valorFiltroApertura(cuenta,t)).filter(Boolean))].sort();
+  const grupos=[...new Set(detalleAperturaCuenta(cuenta).map(t=>valorFiltroApertura(cuenta,t)).filter(Boolean))].sort();
   const gsel=document.getElementById("paGrupo");
   const actual=gsel.value;
   gsel.innerHTML='<option value="">Todos</option>';
@@ -889,7 +901,7 @@ function poblarGrupoApertura(){
 function debugGruposPorConcepto(cuenta){
   const clasFn=CLASIF_APERTURA_FN[cuenta]; if(!clasFn) return {};
   const out={};
-  (APERTURA_DETALLE[cuenta]||[]).forEach(t=>{
+  detalleAperturaCuenta(cuenta).forEach(t=>{
     const c=clasFn(t)||"Otros";
     const v=valorFiltroApertura(cuenta,t);
     if(!out[c]) out[c]=new Set();
@@ -911,7 +923,7 @@ function renderPtoApertura(){
   const sel=document.getElementById("paCuenta"); if(!sel) return;
   const cuenta=sel.value;
   const grupoSel=document.getElementById("paGrupo").value;
-  const todasTCuenta=APERTURA_DETALLE[cuenta]||[];
+  const todasTCuenta=detalleAperturaCuenta(cuenta);
   const todasT=grupoSel?todasTCuenta.filter(t=>normApertura(valorFiltroApertura(cuenta,t))===normApertura(grupoSel)):todasTCuenta;
   const meses=mesesApertura(cuenta,grupoSel);
   const pd=document.getElementById("paDesde"),ph=document.getElementById("paHasta");
@@ -2304,7 +2316,7 @@ function aperturaPtoGrupoDe(cuenta,concepto){
   // APERTURA_PTO (ej. "SPWORK"), que puede no coincidir caracter a caracter con la Razon Social real.
   const nc=normApertura(concepto);
   const conteo={};
-  (APERTURA_DETALLE[cuenta]||[]).forEach(t=>{
+  detalleAperturaCuenta(cuenta).forEach(t=>{
     const nReal=normApertura(clasFn(t)||"Otros");
     if(nReal===nc||nReal.startsWith(nc)||nc.startsWith(nReal)) conteo[t.grupo]=(conteo[t.grupo]||0)+1;
   });
@@ -2333,6 +2345,17 @@ function loadAperturaPtoSeed(){
       }
     });
   });
+  return hubo;
+}
+// Migracion puntual: el Pto de Energia arranco atado al proveedor ("EDESUR"/"EPEN") y se corrigio a
+// atado al Aux 02 ("K) ESTRUCTURA"/"K) ESTRUCTURA NQN") porque el presupuesto es del grupo, no del
+// proveedor puntual (a pedido de Micaela). Como loadAperturaPtoSeed() nunca pisa una clave ya
+// cargada, las dos claves viejas se hubieran quedado sumando doble junto con las nuevas -- se borran
+// una sola vez (idempotente: no rompe nada si ya no estan, por eso no hace falta un flag aparte).
+function migrarPtoEnergiaAux02(){
+  const m=APERTURA_PTO["Energía"]; if(!m) return false;
+  let hubo=false;
+  ["EDESUR","EPEN"].forEach(k=>{ if(m[k]){ delete m[k]; hubo=true; } });
   return hubo;
 }
 async function saveAperturaPto(){ guardarClave('APERTURA_PTO',APERTURA_PTO); }
@@ -3079,6 +3102,7 @@ async function onCargarInformeCrudo(file){
   if(!ok) return; // pantalla de login ya mostrada
   await cargarTodoDesdeSupabase();
   if(loadAperturaPtoSeed()) saveAperturaPto();
+  if(migrarPtoEnergiaAux02()) saveAperturaPto();
   initEerrUI();
   initPto();
   initPtoHist();
