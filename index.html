@@ -953,7 +953,7 @@ function renderPtoApertura(){
         const kEsc=esc(k).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
         const up=idx>0?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',-1)" title="Subir" style="cursor:pointer;padding:0 2px">▲</span>`:`<span style="opacity:.2;padding:0 2px">▲</span>`;
         const down=idx<conceptos.length-1?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
-        return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+        return `<tr><td class="fz fz1 ell" style="max-width:none" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
       }).join("")) || filaVacia;
   // Pto de la cuenta mes a mes, para comparar contra el real de esta apertura. Si hay Pto cargado
   // por concepto (APERTURA_PTO, ver mas abajo) se usa la suma de esos -- asi cada proveedor puede
@@ -1036,7 +1036,7 @@ function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   const rowsHtml=conConceptoPto.map(k=>{
     const cells=mesesSel.map((m,i)=>{ const v=aperturaPtoEnMes(cuenta,k,m); colTot[i]+=v; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
     const totalK=mesesSel.reduce((s,m)=>s+aperturaPtoEnMes(cuenta,k,m),0);
-    return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr${signoCls(totalK)}" style="text-align:right"><b>${fmt(totalK)}</b></td></tr>`;
+    return `<tr><td class="fz fz1 ell" style="max-width:none" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr${signoCls(totalK)}" style="text-align:right"><b>${fmt(totalK)}</b></td></tr>`;
   }).join("");
   const totCells=colTot.map(v=>`<td class="mescol${signoCls(v)}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
   const totalGral=colTot.reduce((s,v)=>s+v,0);
@@ -2135,7 +2135,7 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefi
     // ya que un mismo bucket resumen puede juntar mas de un codigo Aux 02.
     const filasHijos=hijosOrdenados.map(k=>{
       const cellsH=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-      return `<tr><td class="fz fz1 ell" style="max-width:220px;${identHijo}" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+      return `<tr><td class="fz fz1 ell" style="max-width:none;${identHijo}" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
     }).join("");
     return filaResumen+filasHijos;
   }).join("");
