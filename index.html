@@ -2004,7 +2004,7 @@ const APERTURA_CUENTAS=Object.keys(APERTURA_CUENTAS_MAP);
 // diferencia en todas las demas comparaciones de esta pantalla, asi que se usa tambien aca.
 const APERTURA_CUENTA_REAL_A_VIRTUAL={};
 APERTURA_CUENTAS.forEach(v=>APERTURA_CUENTAS_MAP[v].forEach(real=>{APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(real)]=v;}));
-const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"]};
+const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"],"Energía":["Q) AJUSTES CTAS"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
