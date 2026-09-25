@@ -985,8 +985,13 @@ function renderPtoApertura(){
   };
   const ptoPorMes=mesesSel.map(ptoMesFn);
   const totCells=colTot.map((v,i)=>{
+    // El signo manda: si el total del mes es negativo va en rojo siempre, sin importar si superó o
+    // no el Pto (mezclar "neg" con "over"/"under" en la misma celda es ambiguo -- ambas clases tocan
+    // el mismo color y "under" le ganaba a "neg" por orden de declaración en el CSS, mostrando en
+    // verde un mes con total negativo). El over/under (comparación contra Pto) solo aplica cuando el
+    // total del mes es positivo.
     const ptoM=ptoPorMes[i], vBase=colTotBase[i];
-    const cls=(ptoM?(vBase>ptoM?" over":" under"):"")+signoCls(v);
+    const cls=v<0?" neg":(ptoM?(vBase>ptoM?" over":" under"):"");
     return `<td class="mescol${cls}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`;
   }).join("");
   const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr${signoCls(total)}" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
