@@ -293,9 +293,9 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <span class="note">Desglose transacción por transacción del crudo "02-EERR" para esta cuenta, agrupado por concepto. Se va agregando cuenta por cuenta, a pedido.</span>
     </div>
     <div class="kpis" id="paKpis"></div>
-    <div class="pto-wrap" style="display:flex;flex-direction:column;gap:16px">
+    <div class="pto-wrap">
       <div class="table-wrap" style="overflow:visible"><table id="paTabla"></table></div>
-      <div class="table-wrap" id="paPtoWrap" style="display:none;overflow:visible"><table id="paPtoTabla"></table></div>
+      <div class="table-wrap" id="paPtoWrap" style="display:none;overflow:visible;margin-top:16px"><table id="paPtoTabla"></table></div>
     </div>
     <div class="foot" id="paPtoFoot"></div>
     <div class="foot" id="paFoot"></div>
@@ -1038,7 +1038,7 @@ function renderPtoApertura(){
   const desvioRow=`<tr><td class="fz fz1 info">Desvío</td>${desvioCells}<td class="fzr info${totalArsCls}" style="text-align:right"><b>${fmt(desvioTotalSum)}</b></td><td class="fzr info"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("paTabla").className="grid";
-  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr" style="max-width:64px">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
@@ -1077,14 +1077,17 @@ function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   const rowsHtml=conConceptoPto.map(k=>{
     const cells=mesesSel.map((m,i)=>{ const v=aperturaPtoEnMes(cuenta,k,m); colTot[i]+=v; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
     const totalK=mesesSel.reduce((s,m)=>s+aperturaPtoEnMes(cuenta,k,m),0);
-    return `<tr><td class="fz fz1 ell" style="max-width:none" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr${signoCls(totalK)}" style="text-align:right"><b>${fmt(totalK)}</b></td></tr>`;
+    return `<tr><td class="fz fz1 ell" style="max-width:none" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr${signoCls(totalK)}" style="text-align:right"><b>${fmt(totalK)}</b></td><td class="fzr"></td></tr>`;
   }).join("");
   const totCells=colTot.map(v=>`<td class="mescol${signoCls(v)}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
   const totalGral=colTot.reduce((s,v)=>s+v,0);
-  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(totalGral)}</b></td></tr>`;
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(totalGral)}</b></td><td class="fzr"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   tabla.className="grid";
-  tabla.innerHTML=`<thead><tr><th class="fz fz1">Pto por concepto</th>${monthHdr}<th class="fzr" style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
+  // La columna vacia final (sin encabezado) es un espaciador "espejo" de Asientos (paTabla) -- sin
+  // ella, "Total" queda mas angosto que "Total ARS" y se desalinea con esa columna de arriba (ver
+  // sincronizarAnchoPtoConcepto, que le copia el ancho de Asientos).
+  tabla.innerHTML=`<thead><tr><th class="fz fz1">Pto por concepto</th>${monthHdr}<th class="fzr" style="text-align:right">Total</th><th class="fzr"></th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
   colResizeInit(tabla);
   requestAnimationFrame(()=>{ actualizarStickyPto("paPtoTabla"); actualizarStickyPtoDerecha("paPtoTabla"); });
   foot.innerHTML=`Presupuesto de cada concepto de "${esc(cuenta)}", mes a mes, ajustado por inflación desde el mes de cada vigencia (mismo criterio que Presupuesto·Estructura). Se administra por Historial de cambios; avisame los valores y las fechas de vigencia y los cargo.`;
@@ -1336,26 +1339,29 @@ function colResizeSave(table, ths){
 // A pedido de Micaela: que las columnas de "Pto por concepto" (paPtoTabla) sigan el ancho de
 // Concepto + cada mes de la tabla principal (paTabla), para poder leer las dos en paralelo sin que
 // se desalineen -- son tablas separadas (cada una con su propio resize/localStorage), asi que hay
-// que copiar el ancho a mano cada vez que paTabla cambia (render, arrastre, "Ajustar columnas"). La
-// ultima columna de paPtoTabla ("Total") sigue especificamente a "Total ARS" de paTabla (la
-// penultima de esa, ya que la ultima es "Asientos", que no tiene equivalente en Pto por concepto).
+// que copiar el ancho a mano cada vez que paTabla cambia (render, arrastre, "Ajustar columnas"). Las
+// ultimas dos columnas de paPtoTabla ("Total" + el espaciador vacio que le sigue) siguen puntualmente
+// a "Total ARS" y "Asientos" de paTabla -- el espaciador es lo que permite que "Total" quede alineado
+// bajo "Total ARS" en vez de quedar corrido (paPtoTabla, sin el, seria mas angosta que paTabla).
 function sincronizarAnchoPtoConcepto(){
   const principal=document.getElementById("paTabla"), pto=document.getElementById("paPtoTabla");
   if(!principal||!pto) return;
   const thsP=[...principal.querySelectorAll("thead th")], thsPto=[...pto.querySelectorAll("thead th")];
-  if(!thsP.length||!thsPto.length) return;
+  if(thsP.length<2||thsPto.length<2) return;
   pto.style.tableLayout="fixed";
-  const n=thsPto.length-1; // Concepto + meses (todas menos la ultima, "Total")
+  const n=thsPto.length-2; // Concepto + meses (todas menos las ultimas 2: "Total" y el espaciador)
   for(let i=0;i<n;i++){
     if(!thsP[i]) break;
     thsPto[i].style.width=thsP[i].getBoundingClientRect().width+"px";
     thsPto[i].style.maxWidth="none";
   }
-  const totalArsTh=thsP[thsP.length-2]; // penultima de paTabla = "Total ARS" (la ultima es "Asientos")
-  if(totalArsTh){
-    thsPto[thsPto.length-1].style.width=totalArsTh.getBoundingClientRect().width+"px";
-    thsPto[thsPto.length-1].style.maxWidth="none";
-  }
+  // "Total" sigue a "Total ARS" (penultima de paTabla); el espaciador sigue a "Asientos" (la ultima).
+  [thsP[thsP.length-2],thsP[thsP.length-1]].forEach((th,i)=>{
+    if(!th) return;
+    const destino=thsPto[thsPto.length-2+i];
+    destino.style.width=th.getBoundingClientRect().width+"px";
+    destino.style.maxWidth="none";
+  });
 }
 // A diferencia de Compras (tablas que se arman una vez), #pTabla reconstruye TODO su innerHTML en
 // cada render (cambia un filtro, se edita un Pto, etc.), asi que los <th> son siempre nuevos --
