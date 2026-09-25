@@ -2054,6 +2054,7 @@ const APERTURA_CUENTAS_MAP={
   "Alquileres":["Alquileres"],
   "Energía":["Energía Electrica"],
   "Food & Bev":["Food & Bev"],
+  "Movilidad Combustible":["Movilidad Combustible"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
@@ -2070,7 +2071,10 @@ const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"],"Energía":["Q) 
 // A pedido de Micaela: "Food & Bev" deberia mostrar solo (K) ESTRUCTURA) y (K) ESTRUCTURA NQN), como
 // Energia y Alquileres -- la cuenta contable real trae ademas otros Aux 02 (CMV, Inversiones,
 // Proveedores, Ajustes Ctas) que no corresponden a esta apertura.
-const APERTURA_GRUPOS_PERMITIR={"Food & Bev":["K) ESTRUCTURA","K) ESTRUCTURA NQN"]};
+const APERTURA_GRUPOS_PERMITIR={
+  "Food & Bev":["K) ESTRUCTURA","K) ESTRUCTURA NQN"],
+  "Movilidad Combustible":["K) ESTRUCTURA","K) ESTRUCTURA NQN"]
+};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -2136,6 +2140,31 @@ function moverConceptoApertura(cuenta,concepto,dir){
   renderPtoApertura();
 }
 window.moverConceptoApertura=moverConceptoApertura;
+// Leyenda -> Definicion que paso Micaela para "Movilidad Combustible": cada codigo de proveedor
+// (columna "Leyenda" del crudo) se agrupa bajo su categoria de gasto. OJO: "PANAME" aparece dos veces
+// en la lista que me pas\u00F3 (Combustible Y Remises) -- dejo Combustible (la primera vez que aparece),
+// pero avisame cual es el correcto y lo corrijo, porque tal como est\u00E1, un PANAME que en realidad sea
+// un remis se va a contar como combustible.
+const APERTURA_PROVEEDOR_CATEGORIA_MOVILIDAD={
+  "PANAME":"Combustible","DEHE":"Combustible","ANGELA":"Combustible","OESE":"Combustible",
+  "FGCFUE":"Combustible","MANHER":"Combustible","EDENRE":"Combustible","SERVIN":"Combustible",
+  "GUICOM":"Combustible","OPERA":"Combustible","MOCA18":"Combustible","COMPIN":"Combustible",
+  "OGPCA\u00D1":"Combustible","NOTTA":"Combustible","SANJUA":"Combustible","ROCCA":"Combustible",
+  "TIEDOP":"Combustible","PROINC":"Combustible","SERKM":"Combustible",
+  "ROFFO":"Estacionamiento",
+  "AUBASA":"Peajes","AUTRIC":"Peajes","OESTES":"Peajes","SOLSA":"Peajes","AUSA":"Peajes","CEAMSE":"Peajes",
+  "LUCTIS":"Remises","REMIOR":"Remises","CABIFY":"Remises","LUNAHU":"Remises"
+};
+// Match flexible (igual criterio que aperturaPtoKeyFor): la Razon Social real puede traer texto de
+// mas (ej. "PANAME SA") que el codigo corto de la leyenda.
+function categoriaProveedorMovilidad(razonSocial){
+  const nr=normApertura(razonSocial);
+  const clave=Object.keys(APERTURA_PROVEEDOR_CATEGORIA_MOVILIDAD).find(c=>{
+    const nc=normApertura(c);
+    return nr===nc||nr.startsWith(nc)||nc.startsWith(nr);
+  });
+  return clave?APERTURA_PROVEEDOR_CATEGORIA_MOVILIDAD[clave]:null;
+}
 /* Reglas de clasificacion de "Apertura de Estructura": una funcion por cuenta que recibe una
    transaccion (de APERTURA_DETALLE) y devuelve el "Concepto" bajo el que se agrupa en la pantalla.
    Se define codigo por codigo -- avisame para cada cuenta nueva como clasificarla y la agrego ac\u00E1. */
@@ -2155,6 +2184,13 @@ const CLASIF_APERTURA_FN={
   // Misma regla que Energía (Compras -> proveedor, resto -> módulo); acá ademas se colapsan los
   // proveedores fuera del top N en una fila "Otros" (ver APERTURA_TOP_PROVEEDORES), porque son muchos.
   "Food & Bev": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  // A pedido de Micaela: en Compras, el proveedor se agrupa por categoría de gasto (Combustible /
+  // Peajes / Remises / Estacionamiento, ver APERTURA_PROVEEDOR_CATEGORIA_MOVILIDAD) en vez de mostrar
+  // cada proveedor como su propio Concepto -- son muchos proveedores para una sola categoría de gasto
+  // (ej. 19 estaciones de servicio distintas, todas "Combustible"). Un proveedor que no está en la
+  // lista se muestra con su propio nombre (no se lo esconde ni se lo mete en una categoría al azar).
+  // El resto de los módulos se agrupa solo por módulo, igual que Energía/Food & Bev.
+  "Movilidad Combustible": t=>t.origen==="Compras"?(categoriaProveedorMovilidad(t.razonSocial)||t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
