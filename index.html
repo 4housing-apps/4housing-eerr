@@ -397,6 +397,10 @@ const mesLabel=ym=>{const[y,m]=ym.split("-");return MES_ABBR[+m-1]+"-"+y.slice(2
 const MESES=DATA.meses;
 const fmt=v=>new Intl.NumberFormat("es-AR",{maximumFractionDigits:0}).format(Math.round(v||0));
 const fmtM=v=>{const a=Math.abs(v||0);return a>=1e9?(v/1e9).toFixed(2)+" MM":a>=1e6?(v/1e6).toFixed(1)+" M":fmt(v);};
+// Clase de color por signo (a pedido de Micaela, para los detalles de Apertura de Estructura):
+// negativo en rojo, positivo/cero en negro (el color de texto normal -- no el verde de "pos" que usa
+// el resto de la app para ingresos, que acá no aplica).
+const signoCls=v=>v<0?" neg":"";
 const esc=s=>String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;");
 
 /* ===== EERR =====
@@ -945,11 +949,11 @@ function renderPtoApertura(){
     : cfgResumen
     ? filasAperturaResumenPorGrupo(cuenta,cfgResumen,grupos,conceptos,mesesSel)
     : conceptos.map((k,idx)=>{
-        const cells=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+        const cells=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
         const kEsc=esc(k).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
         const up=idx>0?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',-1)" title="Subir" style="cursor:pointer;padding:0 2px">▲</span>`:`<span style="opacity:.2;padding:0 2px">▲</span>`;
         const down=idx<conceptos.length-1?`<span onclick="moverConceptoApertura('${cEsc}','${kEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
-        return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+        return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${up}${down} ${esc(k)}</td>${cells}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right"><b>${fmt(grupos[k].ars)}</b></td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
       }).join("")) || filaVacia;
   // Pto de la cuenta mes a mes, para comparar contra el real de esta apertura. Si hay Pto cargado
   // por concepto (APERTURA_PTO, ver mas abajo) se usa la suma de esos -- asi cada proveedor puede
@@ -976,7 +980,7 @@ function renderPtoApertura(){
     const ptoM=ptoPorMes[i], cls=ptoM?(v>ptoM?" over":" under"):"";
     return `<td class="mescol${cls}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`;
   }).join("");
-  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
+  const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr${signoCls(total)}" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
   // Fila "Pto": el mes a mes es el presupuesto de ese mes (vacío antes de que exista una vigencia
   // cargada); el Total es la suma simple de esos mismos meses -- igual que la columna "Total ARS" de
   // la fila TOTAL, no un acumulado aparte.
@@ -1030,11 +1034,11 @@ function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   wrap.style.display="";
   const colTot=mesesSel.map(()=>0);
   const rowsHtml=conConceptoPto.map(k=>{
-    const cells=mesesSel.map((m,i)=>{ const v=aperturaPtoEnMes(cuenta,k,m); colTot[i]+=v; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    const cells=mesesSel.map((m,i)=>{ const v=aperturaPtoEnMes(cuenta,k,m); colTot[i]+=v; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
     const totalK=mesesSel.reduce((s,m)=>s+aperturaPtoEnMes(cuenta,k,m),0);
-    return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(totalK)}</b></td></tr>`;
+    return `<tr><td class="fz fz1 ell" style="max-width:200px" title="${esc(k)}">${esc(k)}</td>${cells}<td class="fzr${signoCls(totalK)}" style="text-align:right"><b>${fmt(totalK)}</b></td></tr>`;
   }).join("");
-  const totCells=colTot.map(v=>`<td class="mescol" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
+  const totCells=colTot.map(v=>`<td class="mescol${signoCls(v)}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`).join("");
   const totalGral=colTot.reduce((s,v)=>s+v,0);
   const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(totalGral)}</b></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
@@ -2121,17 +2125,17 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefi
     // una cuenta no se abra/cierre junto con "Estructura" de la otra -- son secciones independientes.
     const claveBucket=prefijoClave+info.label;
     const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveBucket];
-    const cells=mesesSel.map(m=>{ const v=info.porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+    const cells=mesesSel.map(m=>{ const v=info.porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
     const bEsc=esc(claveBucket).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${bEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
-    const filaResumen=`<tr class="result"><td class="fz fz1" style="${identBucket}">${flecha}${esc(info.label)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
+    const filaResumen=`<tr class="result"><td class="fz fz1" style="${identBucket}">${flecha}${esc(info.label)}</td>${cells}<td class="fzr${signoCls(info.ars)}" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
     if(!abierto) return filaResumen;
     const hijosOrdenados=info.hijos.slice().sort((a,b)=>grupos[b].ars-grupos[a].ars);
     // El detalle muestra el Concepto completo (con el Grupo real, ej. "P) PROVEEDORES LDS · ..."),
     // ya que un mismo bucket resumen puede juntar mas de un codigo Aux 02.
     const filasHijos=hijosOrdenados.map(k=>{
-      const cellsH=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-      return `<tr><td class="fz fz1 ell" style="max-width:220px;${identHijo}" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
+      const cellsH=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+      return `<tr><td class="fz fz1 ell" style="max-width:220px;${identHijo}" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr${signoCls(grupos[k].ars)}" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
     }).join("");
     return filaResumen+filasHijos;
   }).join("");
@@ -2168,10 +2172,10 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
     const colTotCr=mesesSel.map(m=>conceptosCr.reduce((s,k)=>s+(gruposCr[k].porMes[m]||0),0));
     const claveCr="CUENTA·"+cr;
     const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveCr];
-    const cells=colTotCr.map(v=>`<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
+    const cells=colTotCr.map(v=>`<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
     const clEsc=esc(claveCr).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
-    const filaCuenta=`<tr class="result"><td class="fz fz1"><b>${flecha}${esc(cr)}</b></td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(totalCr)}</b></td><td class="fzr mut" style="text-align:right">${txsCr.length}</td></tr>`;
+    const filaCuenta=`<tr class="result"><td class="fz fz1"><b>${flecha}${esc(cr)}</b></td>${cells}<td class="fzr${signoCls(totalCr)}" style="text-align:right"><b>${fmt(totalCr)}</b></td><td class="fzr mut" style="text-align:right">${txsCr.length}</td></tr>`;
     if(!abierto) return filaCuenta;
     return filaCuenta+filasAperturaResumenPorGrupo(cuenta,cfg,gruposCr,conceptosCr,mesesSel,claveCr+"·");
   }).join("");
