@@ -1335,18 +1335,24 @@ function colResizeSave(table, ths){
 // Concepto + cada mes de la tabla principal (paTabla), para poder leer las dos en paralelo sin que
 // se desalineen -- son tablas separadas (cada una con su propio resize/localStorage), asi que hay
 // que copiar el ancho a mano cada vez que paTabla cambia (render, arrastre, "Ajustar columnas"). La
-// columna final de cada una (Total ARS+Asientos vs Total) no tiene 1 a 1, se deja sin sincronizar.
+// ultima columna de paPtoTabla ("Total") sigue especificamente a "Total ARS" de paTabla (la
+// penultima de esa, ya que la ultima es "Asientos", que no tiene equivalente en Pto por concepto).
 function sincronizarAnchoPtoConcepto(){
   const principal=document.getElementById("paTabla"), pto=document.getElementById("paPtoTabla");
   if(!principal||!pto) return;
   const thsP=[...principal.querySelectorAll("thead th")], thsPto=[...pto.querySelectorAll("thead th")];
   if(!thsP.length||!thsPto.length) return;
   pto.style.tableLayout="fixed";
-  const n=thsPto.length-1; // todas menos la ultima (Total), que no tiene equivalente en paTabla
+  const n=thsPto.length-1; // Concepto + meses (todas menos la ultima, "Total")
   for(let i=0;i<n;i++){
     if(!thsP[i]) break;
     thsPto[i].style.width=thsP[i].getBoundingClientRect().width+"px";
     thsPto[i].style.maxWidth="none";
+  }
+  const totalArsTh=thsP[thsP.length-2]; // penultima de paTabla = "Total ARS" (la ultima es "Asientos")
+  if(totalArsTh){
+    thsPto[thsPto.length-1].style.width=totalArsTh.getBoundingClientRect().width+"px";
+    thsPto[thsPto.length-1].style.maxWidth="none";
   }
 }
 // A diferencia de Compras (tablas que se arman una vez), #pTabla reconstruye TODO su innerHTML en
