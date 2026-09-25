@@ -1053,6 +1053,7 @@ function renderPtoApertura(){
     :"";
   document.getElementById("paFoot").innerHTML=`<details><summary style="cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Notas</summary><div style="margin-top:8px">Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span></div></details>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
+  sincronizarAnchoPtoConcepto();
 }
 // Segunda tabla: Pto de CADA concepto mes a mes (no el real) -- muestra como se compone el Pto
 // agregado de arriba, con la escalada por inflación de cada vigencia (misma lógica que Presupuesto).
@@ -1308,7 +1309,10 @@ function autoFitTable(tableId){
   try{ localStorage.removeItem(colResizeSig(table)); }catch(e){}
   table.style.tableLayout='auto';
   table.querySelectorAll('thead th').forEach(th=>{ th.style.width=''; th.style.maxWidth='none'; });
-  requestAnimationFrame(()=>{ actualizarStickyPto(tableId); actualizarStickyPtoDerecha(tableId); });
+  requestAnimationFrame(()=>{
+    actualizarStickyPto(tableId); actualizarStickyPtoDerecha(tableId);
+    if(tableId==="paTabla") sincronizarAnchoPtoConcepto();
+  });
 }
 window.autoFitTable=autoFitTable;
 function colResizeSig(table){
@@ -1326,6 +1330,24 @@ function colResizeApplySaved(table){
 function colResizeSave(table, ths){
   const widths={}; ths.forEach((th,i)=>{ const w=parseInt(th.style.width,10); if(w) widths[i]=w; });
   try{ localStorage.setItem(colResizeSig(table), JSON.stringify(widths)); }catch(e){}
+}
+// A pedido de Micaela: que las columnas de "Pto por concepto" (paPtoTabla) sigan el ancho de
+// Concepto + cada mes de la tabla principal (paTabla), para poder leer las dos en paralelo sin que
+// se desalineen -- son tablas separadas (cada una con su propio resize/localStorage), asi que hay
+// que copiar el ancho a mano cada vez que paTabla cambia (render, arrastre, "Ajustar columnas"). La
+// columna final de cada una (Total ARS+Asientos vs Total) no tiene 1 a 1, se deja sin sincronizar.
+function sincronizarAnchoPtoConcepto(){
+  const principal=document.getElementById("paTabla"), pto=document.getElementById("paPtoTabla");
+  if(!principal||!pto) return;
+  const thsP=[...principal.querySelectorAll("thead th")], thsPto=[...pto.querySelectorAll("thead th")];
+  if(!thsP.length||!thsPto.length) return;
+  pto.style.tableLayout="fixed";
+  const n=thsPto.length-1; // todas menos la ultima (Total), que no tiene equivalente en paTabla
+  for(let i=0;i<n;i++){
+    if(!thsP[i]) break;
+    thsPto[i].style.width=thsP[i].getBoundingClientRect().width+"px";
+    thsPto[i].style.maxWidth="none";
+  }
 }
 // A diferencia de Compras (tablas que se arman una vez), #pTabla reconstruye TODO su innerHTML en
 // cada render (cambia un filtro, se edita un Pto, etc.), asi que los <th> son siempre nuevos --
@@ -1356,6 +1378,7 @@ document.addEventListener('mousemove', e=>{
   const w=Math.max(32, COLRESIZE_DRAG.startW+(e.clientX-COLRESIZE_DRAG.startX));
   COLRESIZE_DRAG.th.style.width=w+'px';
   if(COLRESIZE_DRAG.table.id==="pTabla"){ actualizarStickyPto(); actualizarStickyPtoDerecha(); }
+  else if(COLRESIZE_DRAG.table.id==="paTabla"){ sincronizarAnchoPtoConcepto(); }
 });
 document.addEventListener('mouseup', ()=>{
   if(!COLRESIZE_DRAG) return;
