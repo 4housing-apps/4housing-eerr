@@ -942,6 +942,13 @@ function renderPtoApertura(){
   const conceptos=resolverOrdenApertura(cuenta,grupos);
   const total=conceptos.reduce((s,k)=>s+grupos[k].ars,0);
   const colTot=mesesSel.map((m,i)=>conceptos.reduce((s,k)=>s+(grupos[k].porMes[m]||0),0));
+  // "Base de cálculo" del desvío contra presupuesto: para las cuentas declaradas en
+  // APERTURA_BASE_CALCULO (a pedido de Micaela, "Cta Part Socios" solo con Estructura e Impuestos --
+  // Proveedores y Ajustes Cuentas quedan afuera, son partidas de paso sin presupuesto propio), el real
+  // que se compara contra el Pto es SOLO la suma de esos buckets, no el total de la cuenta. Para el
+  // resto de las cuentas (sin restricción declarada) sigue siendo el total completo, sin cambios.
+  const conceptosBase=conceptos.filter(k=>enBaseCalculoApertura(cuenta,k));
+  const colTotBase=mesesSel.map((m,i)=>conceptosBase.reduce((s,k)=>s+(grupos[k].porMes[m]||0),0));
   const cfgResumen=APERTURA_RESUMEN_GRUPO[cuenta];
   const porCuentaReal=APERTURA_RESUMEN_POR_CUENTA_REAL[cuenta];
   const filaVacia=`<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
@@ -968,7 +975,7 @@ function renderPtoApertura(){
   // grupo (ej. "K) ESTRUCTURA" -> PRINCI+BERGER+Expensas, sin SPWORK) -- son "dos Ptos distintos"
   // que se ven sumados en una sola fila cuando el filtro esta en "Todos".
   const ptoConceptosTodos=Object.keys(APERTURA_PTO[cuenta]||{});
-  const ptoConceptos=grupoSel?ptoConceptosTodos.filter(k=>normApertura(aperturaPtoGrupoDe(cuenta,k))===normApertura(grupoSel)):ptoConceptosTodos;
+  const ptoConceptos=grupoSel?ptoConceptosTodos.filter(k=>normApertura(aperturaPtoFiltroDe(cuenta,k))===normApertura(grupoSel)):ptoConceptosTodos;
   const tienePtoPorConcepto=!!ptoConceptosTodos.length;
   const ovCuenta=OVERRIDES[cuenta];
   const baseCuenta=ovCuenta?ovCuenta.base:"mensual";
@@ -978,7 +985,8 @@ function renderPtoApertura(){
   };
   const ptoPorMes=mesesSel.map(ptoMesFn);
   const totCells=colTot.map((v,i)=>{
-    const ptoM=ptoPorMes[i], cls=ptoM?(v>ptoM?" over":" under"):"";
+    const ptoM=ptoPorMes[i], vBase=colTotBase[i];
+    const cls=(ptoM?(vBase>ptoM?" over":" under"):"")+signoCls(v);
     return `<td class="mescol${cls}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`;
   }).join("");
   const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr${signoCls(total)}" style="text-align:right"><b>${fmt(total)}</b></td><td class="fzr" style="text-align:right">${txs.length}</td></tr>`;
@@ -991,7 +999,7 @@ function renderPtoApertura(){
   // Fila "Desvío": Pto - Real de cada mes (vacío en los meses sin Pto todavía); el Total es la
   // sumatoria de esas mismas diferencias del período visible. Positivo (verde) = por debajo del
   // Pto; negativo (rojo) = lo superó.
-  const desvios=colTot.map((v,i)=>ptoPorMes[i]?ptoPorMes[i]-v:null);
+  const desvios=colTotBase.map((v,i)=>ptoPorMes[i]?ptoPorMes[i]-v:null);
   const desvioCells=desvios.map(d=>{
     const cls=d?(d<0?" over":" under"):"";
     return `<td class="mescol info${cls}" style="text-align:right">${d==null?"–":fmt(d)}</td>`;
@@ -1025,7 +1033,7 @@ function renderPtoApertura(){
 function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   const wrap=document.getElementById("paPtoWrap"), tabla=document.getElementById("paPtoTabla"), foot=document.getElementById("paPtoFoot");
   let ptoKeys=Object.keys(APERTURA_PTO[cuenta]||{});
-  if(grupoSel) ptoKeys=ptoKeys.filter(k=>normApertura(aperturaPtoGrupoDe(cuenta,k))===normApertura(grupoSel));
+  if(grupoSel) ptoKeys=ptoKeys.filter(k=>normApertura(aperturaPtoFiltroDe(cuenta,k))===normApertura(grupoSel));
   // Mismo orden manual que la tabla de arriba (APERTURA_ORDEN), para que las dos tablas se lean
   // consistentes; los conceptos con Pto que todavia no entraron en ese orden van al final.
   const ordenGuardado=(APERTURA_ORDEN[cuenta]||[]).filter(k=>ptoKeys.includes(k));
@@ -2221,8 +2229,43 @@ const APERTURA_PTO_SEED={
     "SPWORK":[{desde:"2026-04",pto:7050000}],
     "BERGER":[{desde:"2026-04",pto:1400000}],
     "Expensas Of. CABA":[{desde:"2026-04",pto:730000}]
+  },
+  // A pedido de Micaela: el único gasto de "Cta Part Socios" con presupuesto propio es el Autónomos de
+  // Estructura, $310.000 por socio desde abril/2026 (mismo monto para los 4). Impuestos, Proveedores y
+  // Ajustes Cuentas no tienen Pto cargado todavía.
+  "Cta Part Socios":{
+    "Pedretti Gustavo · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}],
+    "Seoane Leandro · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}],
+    "Seoane Micaela · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}],
+    "Spinetto Pablo · Estructura (Autónomos)":[{desde:"2026-04",pto:310000}]
   }
 };
+// A que socio pertenece cada Pto de "Cta Part Socios" -- a diferencia de aperturaPtoGrupoDe (que
+// infiere el Grupo/Aux 02 mirando qué transacciones reales coinciden con la clave), acá se declara a
+// mano: la clave del Pto ("Pedretti Gustavo · Estructura (Autónomos)") no tiene por qué coincidir
+// textualmente con el Concepto real ("K) ESTRUCTURA · Módulo · Tipo"), porque en esta cuenta el socio
+// es un eje aparte (se filtra por "cuenta real", no por Concepto). Ver aperturaPtoFiltroDe más abajo.
+const APERTURA_PTO_FILTRO={
+  "Cta Part Socios":{
+    "Pedretti Gustavo · Estructura (Autónomos)":"Pedretti Gustavo",
+    "Seoane Leandro · Estructura (Autónomos)":"Seoane Leandro",
+    "Seoane Micaela · Estructura (Autónomos)":"Seoane Micaela",
+    "Spinetto Pablo · Estructura (Autónomos)":"Spinetto Pablo"
+  }
+};
+// A pedido de Micaela: "solo Estructura e Impuestos debiera... usarse de base de cálculo para
+// analizar desvío respecto del presupuesto" -- Proveedores y Ajustes Cuentas quedan afuera de la fila
+// "Desvío" (y del color over/under de la fila TOTAL) de "Cta Part Socios" porque son partidas de paso
+// (ver la nota de "Proveedores" más abajo, entradas espejo casi siempre en cero) sin presupuesto
+// propio. El resto de las cuentas no tiene restricción (enBaseCalculoApertura devuelve true siempre).
+const APERTURA_BASE_CALCULO={"Cta Part Socios":["Estructura","Impuestos"]};
+function enBaseCalculoApertura(cuenta,concepto){
+  const buckets=APERTURA_BASE_CALCULO[cuenta]; if(!buckets) return true;
+  const cfg=APERTURA_RESUMEN_GRUPO[cuenta]; if(!cfg) return true;
+  const grupoReal=String(concepto).split(" · ")[0];
+  const b=cfg.find(bb=>bucketMatch(bb,grupoReal));
+  return !!b && buckets.indexOf(b.label)>=0;
+}
 // A que "Grupo" (Aux 02, ej. "K) ESTRUCTURA" / "K) ESTRUCTURA NQN") pertenece el Pto de cada
 // concepto -- a pedido de Micaela, esto NO se declara a mano por nombre de proveedor: "tenes que
 // enfocarte en lo que diga el Aux 02, no en cual es el proveedor". Un concepto puede en teoria tener
@@ -2241,6 +2284,16 @@ function aperturaPtoGrupoDe(cuenta,concepto){
   let mejor=null,max=0;
   Object.keys(conteo).forEach(g=>{ if(conteo[g]>max){ max=conteo[g]; mejor=g; } });
   return mejor;
+}
+// Con qué valor del filtro de arriba (Grupo real, o Socio para las cuentas con APERTURA_FILTRO_FN
+// propio) hay que comparar un Pto para saber si entra cuando ese filtro está acotado a un valor
+// puntual. Usa la declaración explícita de APERTURA_PTO_FILTRO si existe (necesario para "Cta Part
+// Socios", ver más abajo); si no, cae al criterio viejo por Aux 02 (aperturaPtoGrupoDe), sin cambios
+// para las demás cuentas (ej. Alquileres).
+function aperturaPtoFiltroDe(cuenta,concepto){
+  const m=APERTURA_PTO_FILTRO[cuenta];
+  if(m&&m[concepto]!=null) return m[concepto];
+  return aperturaPtoGrupoDe(cuenta,concepto);
 }
 function loadAperturaPtoSeed(){
   let hubo=false;
