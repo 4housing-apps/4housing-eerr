@@ -938,8 +938,11 @@ function renderPtoApertura(){
   const total=conceptos.reduce((s,k)=>s+grupos[k].ars,0);
   const colTot=mesesSel.map((m,i)=>conceptos.reduce((s,k)=>s+(grupos[k].porMes[m]||0),0));
   const cfgResumen=APERTURA_RESUMEN_GRUPO[cuenta];
+  const porCuentaReal=APERTURA_RESUMEN_POR_CUENTA_REAL[cuenta];
   const filaVacia=`<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
-  const rowsHtml=(cfgResumen
+  const rowsHtml=(cfgResumen&&porCuentaReal
+    ? filasAperturaPorCuentaReal(cuenta,cfgResumen,txs,clasFn,mesesSel)
+    : cfgResumen
     ? filasAperturaResumenPorGrupo(cuenta,cfgResumen,grupos,conceptos,mesesSel)
     : conceptos.map((k,idx)=>{
         const cells=mesesSel.map(m=>{ const v=grupos[k].porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
@@ -1003,7 +1006,9 @@ function renderPtoApertura(){
   // desplegable "Grupo" y cuantos registros encontro comparando contra eso, sobre el total de la
   // cuenta -- para confirmar en vivo, en el navegador real, si el filtro esta encontrando algo o no.
   const debugFiltro=`${etiquetaFiltroApertura(cuenta)} elegido: ${JSON.stringify(grupoSel)} (${grupoSel.length} caracteres) · coincidencias: ${todasT.length} de ${todasTCuenta.length} registros totales de "${esc(cuenta)}"`;
-  const notaResumen=cfgResumen?` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`:"";
+  const notaResumen=!cfgResumen?"":porCuentaReal
+    ?` Primero se abre por cuenta contable real (pesos y USD, nunca mezcladas), luego por Grupo (${cfgResumen.map(b=>b.label).join(", ")}), luego por Módulo y Tipo de comprobante — hacé clic en cada flecha para ver el siguiente nivel.`
+    :` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`;
   document.getElementById("paFoot").innerHTML=`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
 }
@@ -2066,6 +2071,11 @@ const APERTURA_RESUMEN_GRUPO={
     {label:"Ajustes Cuentas",grupos:["Q) AJUSTES CTAS"]}
   ]
 };
+// A pedido de Micaela: "partis de la cuenta contable, luego del Aux 02, luego del modulo, luego del
+// Tipo de comprobante" -- para estas cuentas virtuales, ANTES de resumir por Grupo/Aux 02 (arriba) se
+// abre primero una fila por cada cuenta REAL (ej. "Cta part Seoane Leandro" y "...  (USD)" por
+// separado, nunca mezcladas), y recien adentro de cada una se resume por Grupo.
+const APERTURA_RESUMEN_POR_CUENTA_REAL={"Cta Part Socios":true};
 // Que buckets estan expandidos (mostrando su detalle) -- en memoria nomas, no hace falta persistirlo:
 // arranca todo colapsado, que es como Micaela pidio verlo por default.
 const APERTURA_RESUMEN_ABIERTO={};
@@ -2075,7 +2085,8 @@ function toggleResumenApertura(cuenta,bucket){
   renderPtoApertura();
 }
 window.toggleResumenApertura=toggleResumenApertura;
-function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel){
+function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefijoClave){
+  prefijoClave=prefijoClave||"";
   const codigoABucket={};
   cfg.forEach((b,i)=>b.grupos.forEach(g=>{codigoABucket[g]=i;}));
   const buckets=cfg.map(b=>({label:b.label,ars:0,n:0,porMes:{},hijos:[]}));
@@ -2092,10 +2103,13 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel){
   const extraOrdenados=Object.values(extra).sort((a,b)=>b.ars-a.ars);
   const todos=[...buckets.filter(b=>b.hijos.length),...extraOrdenados];
   const filas=todos.map(info=>{
-    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+info.label];
+    // La clave de expandido incluye el prefijo (ej. la cuenta real ARS/USD) para que "Estructura" de
+    // una cuenta no se abra/cierre junto con "Estructura" de la otra -- son secciones independientes.
+    const claveBucket=prefijoClave+info.label;
+    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveBucket];
     const cells=mesesSel.map(m=>{ const v=info.porMes[m]||0; return `<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-    const lEsc=esc(info.label).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
-    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${lEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
+    const bEsc=esc(claveBucket).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
+    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${bEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
     const filaResumen=`<tr class="result"><td class="fz fz1">${flecha}${esc(info.label)}</td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(info.ars)}</b></td><td class="fzr mut" style="text-align:right">${info.n}</td></tr>`;
     if(!abierto) return filaResumen;
     const hijosOrdenados=info.hijos.slice().sort((a,b)=>grupos[b].ars-grupos[a].ars);
@@ -2106,6 +2120,46 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel){
       return `<tr><td class="fz fz1 ell" style="max-width:220px;padding-left:22px" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr" style="text-align:right">${fmt(grupos[k].ars)}</td><td class="fzr mut" style="text-align:right">${grupos[k].n}</td></tr>`;
     }).join("");
     return filaResumen+filasHijos;
+  }).join("");
+  return filas||"";
+}
+// Nivel de mas arriba: una fila colapsable por CUENTA REAL (ej. "Cta part Seoane Leandro" y
+// "Cta part Seoane Leandro (USD)" nunca mezcladas), y adentro de cada una, el mismo resumen por
+// Grupo de arriba. Recibe "txs" ya filtradas por Socio/mes -- rearma "grupos"/"conceptos" propios
+// para cada cuenta real, porque los que ya calculó renderPtoApertura mezclan todas las cuentas.
+function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
+  const porCuentaReal={};
+  txs.forEach(t=>{
+    const cr=t.cuenta||"(sin cuenta)";
+    if(!porCuentaReal[cr]) porCuentaReal[cr]=[];
+    porCuentaReal[cr].push(t);
+  });
+  // Pesos primero, USD despues -- alfabetico dentro de cada grupo de moneda.
+  const cuentasReales=Object.keys(porCuentaReal).sort((a,b)=>{
+    const aUsd=/\(usd\)/i.test(a), bUsd=/\(usd\)/i.test(b);
+    if(aUsd!==bUsd) return aUsd?1:-1;
+    return a<b?-1:(a>b?1:0);
+  });
+  const filas=cuentasReales.map(cr=>{
+    const txsCr=porCuentaReal[cr];
+    const gruposCr={};
+    txsCr.forEach(t=>{
+      const concepto=clasFn(t)||"Otros";
+      if(!gruposCr[concepto]) gruposCr[concepto]={ars:0,n:0,porMes:{}};
+      gruposCr[concepto].ars+=t.ars; gruposCr[concepto].n++;
+      gruposCr[concepto].porMes[t.mes]=(gruposCr[concepto].porMes[t.mes]||0)+t.ars;
+    });
+    const conceptosCr=Object.keys(gruposCr);
+    const totalCr=conceptosCr.reduce((s,k)=>s+gruposCr[k].ars,0);
+    const colTotCr=mesesSel.map(m=>conceptosCr.reduce((s,k)=>s+(gruposCr[k].porMes[m]||0),0));
+    const claveCr="CUENTA·"+cr;
+    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveCr];
+    const cells=colTotCr.map(v=>`<td class="mescol" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
+    const clEsc=esc(claveCr).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
+    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
+    const filaCuenta=`<tr class="result"><td class="fz fz1"><b>${flecha}${esc(cr)}</b></td>${cells}<td class="fzr" style="text-align:right"><b>${fmt(totalCr)}</b></td><td class="fzr mut" style="text-align:right">${txsCr.length}</td></tr>`;
+    if(!abierto) return filaCuenta;
+    return filaCuenta+filasAperturaResumenPorGrupo(cuenta,cfg,gruposCr,conceptosCr,mesesSel,claveCr+"·");
   }).join("");
   return filas||"";
 }
