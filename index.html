@@ -77,12 +77,6 @@ h1{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0;}
 select,.ctl input{border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:14px;color:var(--ink);background:#fff;cursor:pointer;}
 .note{font-size:10.5px;color:var(--muted);align-self:center;max-width:320px;}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:6px 0 14px;}
-/* "Congeladas" arriba al hacer scroll (a pedido de Micaela) -- clase aparte, no todo .controls/.kpis,
-   para no tocar las barras de arriba de todo (carga de crudo, bloqueo de historico) ni otras pestañas
-   donde no hace falta. El "top" real de cada una lo pisa actualizarStickyVertical() en JS, porque
-   depende del alto que terminen ocupando en pantalla (varia con el ancho de ventana). */
-.sticky-bar{position:sticky;z-index:9;background:var(--bg);}
-.controls.sticky-bar{background:var(--surface);}
 .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 14px;box-shadow:0 1px 2px rgba(40,56,32,.045);}
 .kpi .k-lbl{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em;}
 .kpi .k-val{font-size:21px;font-weight:700;margin-top:4px;letter-spacing:-.02em;}
@@ -271,7 +265,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
     <button class="subtab" id="ptoSubBtnHist" onclick="showPtoSub('hist')">Historial de cambios</button>
   </div>
   <div id="ptoSubMain">
-    <div class="controls sticky-bar">
+    <div class="controls">
       <div class="ctl"><label for="pBloque">Bloque</label><select id="pBloque"><option value="K) ESTRUCTURA">Estructura</option><option value="K) ESTRUCTURA NQN">Estructura NQN</option><option value="N) SUELDOS">Sueldos</option><option value="O) IMPUESTOS">Impuestos</option></select></div>
       <div class="ctl"><label for="pMoneda">Moneda</label><select id="pMoneda"><option value="0" selected>Pesos ($)</option><option value="1">USD Oficial</option><option value="2">USD Billete</option><option value="3">Ajustado x inflación (AXI)</option></select></div>
       <div class="ctl"><label for="pResp">Responsable</label><select id="pResp"></select></div>
@@ -282,14 +276,14 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label>&nbsp;</label><label style="display:flex;align-items:center;gap:6px;font-weight:400;font-size:13px;padding:9px 0"><input type="checkbox" id="pTogglePtoPesos"> Mostrar Base / Pto ($) / Pto mes</label></div>
       <span class="note">Cargá el presupuesto en <b>pesos de hoy</b> (fecha base abajo). En <b>pesos</b> se muestra plano; en <b>AXI</b> ajustado por inflación; en <b>USD</b> queda fijo al cierre del 30/06. Editable; se guarda en este navegador.</span>
     </div>
-    <div id="ptoCfg" class="sticky-bar" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
-    <div class="kpis sticky-bar" id="pKpis"></div>
+    <div id="ptoCfg" style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin:6px 0 2px"></div>
+    <div class="kpis" id="pKpis"></div>
     <div class="bar"><div class="lock"><span id="lockState">Edición bloqueada</span><input id="lockKey" class="lockkey" type="password" placeholder="Clave" style="display:none"><button class="lockbtn" id="btnLock">Desbloquear (Gerencia)</button></div><button class="btn" id="btnCsv">Descargar Excel</button><button class="btn" id="btnPdf">Imprimir / PDF</button></div>
     <div class="table-wrap pto-wrap"><table id="pTabla"></table></div>
     <div class="foot" id="pFoot"></div>
   </div>
   <div id="ptoSubApert" style="display:none">
-    <div class="controls sticky-bar">
+    <div class="controls">
       <div class="ctl"><label for="paCuenta">Cuenta contable</label><select id="paCuenta"></select></div>
       <div class="ctl"><label for="paGrupo">Grupo</label><select id="paGrupo"><option value="">Todos</option></select></div>
       <div class="ctl"><label for="paDesde">Desde</label><select id="paDesde"></select></div>
@@ -298,7 +292,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="autoFitTable('paTabla')">Ajustar columnas</button></div>
       <span class="note">Desglose transacción por transacción del crudo "02-EERR" para esta cuenta, agrupado por concepto. Se va agregando cuenta por cuenta, a pedido.</span>
     </div>
-    <div class="kpis sticky-bar" id="paKpis"></div>
+    <div class="kpis" id="paKpis"></div>
     <div class="table-wrap"><table id="paTabla"></table></div>
     <div class="table-wrap" id="paPtoWrap" style="display:none;margin-top:18px"><table id="paPtoTabla"></table></div>
     <div class="foot" id="paPtoFoot"></div>
@@ -554,7 +548,7 @@ function showPtoSub(v){
   document.getElementById("ptoSubBtnHist").classList.toggle("active",v==="hist");
   if(v==="hist") renderPtoHist();
   else if(v==="apert"){ poblarMesesApertura(); renderPtoApertura(); }
-  else requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); actualizarStickyVerticalPto(); });
+  else requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); });
 }
 window.showPtoSub=showPtoSub;
 
@@ -851,15 +845,21 @@ function nombreSocioDeCuenta(cuentaReal){
 const APERTURA_FILTRO_FN={"Cta Part Socios":t=>nombreSocioDeCuenta(t.cuenta)};
 function valorFiltroApertura(cuenta,t){ const fn=APERTURA_FILTRO_FN[cuenta]; return fn?fn(t):t.grupo; }
 function etiquetaFiltroApertura(cuenta){ return APERTURA_FILTRO_FN[cuenta]?"Socio":"Grupo"; }
-// Todas las transacciones de "cuenta" ya sin las que estan excluidas por Aux 02 (APERTURA_GRUPOS_EXCLUIR).
-// Se aplica siempre que se lee APERTURA_DETALLE para esta pantalla -- asi una exclusion nueva (o
+// Todas las transacciones de "cuenta" ya sin las que estan excluidas por Aux 02 (APERTURA_GRUPOS_EXCLUIR)
+// o, para las cuentas declaradas en APERTURA_GRUPOS_PERMITIR, quedandose solo con los Aux 02 de esa
+// lista (ej. "Food & Bev": la cuenta contable real comparte codigo con otros Aux 02 -- A) CMV VENTA,
+// M) INVERSIONES, P) PROVEEDORES*, Q) AJUSTES CTAS -- que no tienen nada que ver con la apertura;
+// mas facil declarar los 2 que SI importan que ir listando cada codigo ajeno que aparezca). Se aplica
+// siempre que se lee APERTURA_DETALLE para esta pantalla -- asi una exclusion/permiso nuevo (o
 // cambiada) se ve al toque en Grupo/meses/tabla/Pto, sin depender de volver a subir el crudo (el
 // filtro que hace parseRawLedgerCuentas al guardar solo corre de nuevo cuando se sube un archivo
 // nuevo; los datos ya guardados de antes de esa exclusion se quedan como estaban hasta que se filtran
 // aca tambien).
 function detalleAperturaCuenta(cuenta){
-  const excl=APERTURA_GRUPOS_EXCLUIR[cuenta];
   const todo=APERTURA_DETALLE[cuenta]||[];
+  const permitir=APERTURA_GRUPOS_PERMITIR[cuenta];
+  if(permitir&&permitir.length) return todo.filter(t=>permitir.some(g=>normApertura(g)===normApertura(t.grupo)));
+  const excl=APERTURA_GRUPOS_EXCLUIR[cuenta];
   if(!excl||!excl.length) return todo;
   return todo.filter(t=>!excl.some(g=>normApertura(g)===normApertura(t.grupo)));
 }
@@ -1038,7 +1038,7 @@ function renderPtoApertura(){
   document.getElementById("paTabla").className="grid";
   document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
-  requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); actualizarStickyVerticalApertura(); });
+  requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
   const debugGrupos=debugGruposPorConcepto(cuenta);
   const debugTxt=Object.keys(debugGrupos).sort().map(c=>esc(c)+": "+[...debugGrupos[c]].map(esc).join(", ")).join(" · ");
@@ -1191,30 +1191,10 @@ function actualizarStickyPtoDerecha(tableId){
   if(!styleEl){ styleEl=document.createElement("style"); styleEl.id=styleId; document.head.appendChild(styleEl); }
   styleEl.textContent=css;
 }
-// "Congela" arriba de la pantalla la barra de filtros + KPIs (y config, si la cuenta) apilados uno
-// debajo del otro, y corre el encabezado de la tabla (que ya es sticky) lo necesario para que quede
-// debajo de todo eso -- a pedido de Micaela, para poder desplazarse por listas largas (Food & Bev,
-// Cta Part Socios) sin perder de vista con que cuenta/fecha esta mirando ni el encabezado de mes de
-// cada columna. "elementos" son los divs .sticky-bar de esa vista, en el orden en que se apilan.
-function actualizarStickyVertical(elementos,tableId){
-  const table=document.getElementById(tableId); if(!table||table.offsetParent===null) return;
-  let acc=0;
-  elementos.forEach(el=>{ if(!el) return; el.style.top=acc+"px"; acc+=el.getBoundingClientRect().height; });
-  const styleId=tableId+"StickyVCSS";
-  let styleEl=document.getElementById(styleId);
-  if(!styleEl){ styleEl=document.createElement("style"); styleEl.id=styleId; document.head.appendChild(styleEl); }
-  styleEl.textContent=`#${tableId} thead th{top:${acc}px;}`;
-}
-function actualizarStickyVerticalPto(){
-  actualizarStickyVertical([document.querySelector("#ptoSubMain .controls"),document.getElementById("ptoCfg"),document.getElementById("pKpis")],"pTabla");
-}
-function actualizarStickyVerticalApertura(){
-  actualizarStickyVertical([document.querySelector("#ptoSubApert .controls"),document.getElementById("paKpis")],"paTabla");
-}
 window.addEventListener("resize",()=>{
   if(document.getElementById("view-pto").style.display==="none") return;
-  if(document.getElementById("ptoSubMain").style.display!=="none"){ actualizarStickyPto(); actualizarStickyPtoDerecha(); actualizarStickyVerticalPto(); }
-  else if(document.getElementById("ptoSubApert").style.display!=="none"){ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); actualizarStickyVerticalApertura(); }
+  if(document.getElementById("ptoSubMain").style.display!=="none"){ actualizarStickyPto(); actualizarStickyPtoDerecha(); }
+  else if(document.getElementById("ptoSubApert").style.display!=="none"){ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); }
 });
 let pMostrarDetallePto=false; // Base/Pto Pesos/Pto-mes empiezan escondidos: son de consulta ocasional
                                // y ocupan lugar que se necesita para ver más meses de gasto real.
@@ -1305,7 +1285,7 @@ window.togglePtoDetalle=togglePtoDetalle;
     </tr></thead><tbody>${body}${totalRow}</tbody>`;
   document.querySelectorAll('.ptofbtn').forEach(el=>el.addEventListener('click',ev=>openPtoColFilter(el.dataset.col,ev,rowsPreCol)));
   colResizeInit(document.getElementById("pTabla"));
-  requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); actualizarStickyVerticalPto(); });
+  requestAnimationFrame(()=>{ actualizarStickyPto(); actualizarStickyPtoDerecha(); });
   const respLegend=[...new Set(rows.map(c=>c.responsable).filter(Boolean))].sort().map(n=>`<b>${iniciales(n)}</b>=${esc(n.replace(/\s*,\s*/,", "))}`).join(" · ");
   document.getElementById("pKpis").innerHTML=
     `<div class="kpi"><div class="k-lbl">Real del período</div><div class="k-val">${curLbl} ${fmtM(tRealPer)}</div></div>
@@ -2050,6 +2030,10 @@ const APERTURA_CUENTAS=Object.keys(APERTURA_CUENTAS_MAP);
 const APERTURA_CUENTA_REAL_A_VIRTUAL={};
 APERTURA_CUENTAS.forEach(v=>APERTURA_CUENTAS_MAP[v].forEach(real=>{APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(real)]=v;}));
 const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"],"Energía":["Q) AJUSTES CTAS"]};
+// A pedido de Micaela: "Food & Bev" deberia mostrar solo (K) ESTRUCTURA) y (K) ESTRUCTURA NQN), como
+// Energia y Alquileres -- la cuenta contable real trae ademas otros Aux 02 (CMV, Inversiones,
+// Proveedores, Ajustes Ctas) que no corresponden a esta apertura.
+const APERTURA_GRUPOS_PERMITIR={"Food & Bev":["K) ESTRUCTURA","K) ESTRUCTURA NQN"]};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
