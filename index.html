@@ -138,7 +138,7 @@ table.grid tr.result td.fzr{background:#EDEBE1;}
 .mescol{min-width:70px;max-width:90px;}
 /* Los encabezados largos ("Acum. desde ..." etc.) pasan a dos líneas en vez de recortarse o
    superponerse con la columna de al lado cuando la columna es angosta. */
-table.grid thead th{white-space:normal;line-height:1.25;}
+table.grid thead th{white-space:normal;line-height:1.25;text-align:center;vertical-align:middle;}
 /* Distinción visual entre columnas de gasto real (fondo plano) y columnas de info/cálculo
    (Pto, desvíos, acumulado, etc. -- fondo tenue para que se note de un vistazo cuál es cuál). */
 table.grid td.info,table.grid th.info{background:#F7F1E4;}
@@ -289,6 +289,7 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label for="paDesde">Desde</label><select id="paDesde"></select></div>
       <div class="ctl"><label for="paHasta">Hasta</label><select id="paHasta"></select></div>
       <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="ultimoAnioApertura()">Último año</button></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="autoFitTable('paTabla')">Ajustar columnas</button></div>
       <span class="note">Desglose transacción por transacción del crudo "02-EERR" para esta cuenta, agrupado por concepto. Se va agregando cuenta por cuenta, a pedido.</span>
     </div>
     <div class="kpis" id="paKpis"></div>
@@ -1000,7 +1001,7 @@ function renderPtoApertura(){
   const desvioRow=`<tr><td class="fz fz1 info">Desvío</td>${desvioCells}<td class="fzr info${totalArsCls}" style="text-align:right"><b>${fmt(desvioTotalSum)}</b></td><td class="fzr info"></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   document.getElementById("paTabla").className="grid";
-  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
+  document.getElementById("paTabla").innerHTML=`<thead><tr><th class="fz fz1">Concepto</th>${monthHdr}<th class="fzr">Total ARS</th><th class="fzr">Asientos</th></tr></thead><tbody>${rowsHtml}${totalRow}${ptoRow}${desvioRow}</tbody>`;
   colResizeInit(document.getElementById("paTabla"));
   requestAnimationFrame(()=>{ actualizarStickyPto("paTabla"); actualizarStickyPtoDerecha("paTabla"); });
   document.getElementById("paKpis").innerHTML=`<div class="kpi"><div class="k-lbl">Total del período</div><div class="k-val">$ ${fmtM(total)}</div></div><div class="kpi"><div class="k-lbl">Asientos</div><div class="k-val">${txs.length}</div></div><div class="kpi"><div class="k-lbl">Conceptos distintos</div><div class="k-val">${conceptos.length}</div></div>`;
@@ -1043,7 +1044,7 @@ function renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel){
   const totalRow=`<tr class="result"><td class="fz fz1">TOTAL</td>${totCells}<td class="fzr" style="text-align:right"><b>${fmt(totalGral)}</b></td></tr>`;
   const monthHdr=mesesSel.map(m=>`<th class="mescol">${mesLabel(m)}</th>`).join("");
   tabla.className="grid";
-  tabla.innerHTML=`<thead><tr><th class="fz fz1" style="text-align:left">Pto por concepto</th>${monthHdr}<th class="fzr" style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
+  tabla.innerHTML=`<thead><tr><th class="fz fz1">Pto por concepto</th>${monthHdr}<th class="fzr" style="text-align:right">Total</th></tr></thead><tbody>${rowsHtml}${totalRow}</tbody>`;
   colResizeInit(tabla);
   requestAnimationFrame(()=>{ actualizarStickyPto("paPtoTabla"); actualizarStickyPtoDerecha("paPtoTabla"); });
   foot.innerHTML=`Presupuesto de cada concepto de "${esc(cuenta)}", mes a mes, ajustado por inflación desde el mes de cada vigencia (mismo criterio que Presupuesto·Estructura). Se administra por Historial de cambios; avisame los valores y las fechas de vigencia y los cargo.`;
@@ -1261,6 +1262,18 @@ window.togglePtoDetalle=togglePtoDetalle;
    del borde derecho de un encabezado para ensanchar/achicar esa columna; queda guardado por
    navegador, no hace falta rehacerlo cada vez que se entra a Presupuesto. */
 let COLRESIZE_DRAG=null;
+// Botón "Ajustar columnas": vuelve la tabla a ancho automático (cada columna toma el ancho que
+// necesita su contenido, según el propio navegador) y borra el ancho guardado a mano en localStorage,
+// para no tener que ir arrastrando cada columna una por una. Después de esto se puede seguir
+// arrastrando cualquier columna en particular como siempre.
+function autoFitTable(tableId){
+  const table=document.getElementById(tableId); if(!table) return;
+  try{ localStorage.removeItem(colResizeSig(table)); }catch(e){}
+  table.style.tableLayout='auto';
+  table.querySelectorAll('thead th').forEach(th=>{ th.style.width=''; th.style.maxWidth='none'; });
+  requestAnimationFrame(()=>{ actualizarStickyPto(tableId); actualizarStickyPtoDerecha(tableId); });
+}
+window.autoFitTable=autoFitTable;
 function colResizeSig(table){
   const ths=[...table.querySelectorAll('thead th')].map(th=>(th.textContent||'').trim()).join('|');
   let h=0; for(let i=0;i<ths.length;i++) h=(h*31+ths.charCodeAt(i))|0;
@@ -2059,8 +2072,16 @@ const CLASIF_APERTURA_FN={
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
   // Qué cuenta real (socio/moneda) es, se filtra aparte con el selector de arriba (APERTURA_FILTRO_FN).
-  "Cta Part Socios": t=>`${t.grupo||"(sin grupo)"} · ${t.origen||"(sin módulo)"} · ${t.tipoComp||"(sin tipo)"}`
+  "Cta Part Socios": t=>`${t.grupo||"(sin grupo)"} · ${t.origen||"(sin módulo)"} · ${tipoCompCorto(t.tipoComp)||"(sin tipo)"}`
 };
+// El crudo trae el Tipo de comprobante como "CN - Asientos de Contabilidad", "FC - Factura", etc. --
+// a pedido de Micaela se muestra solo el código corto ("CN", "FC") para que la columna Concepto entre
+// más cómoda; si el texto no tiene el separador " - " se deja tal cual vino.
+function tipoCompCorto(s){
+  s=String(s||"").trim();
+  const i=s.indexOf(" - ");
+  return i>=0?s.slice(0,i).trim():s;
+}
 // Para las cuentas cuyo Concepto es "Grupo · Módulo · Tipo comprobante" (ej. "Cta Part Socios"), la
 // tabla resume en una fila por "bucket" (colapsada, con flecha para ver el detalle), en el orden que
 // pidió Micaela. Un bucket puede juntar MAS DE UN Grupo/Aux 02 real -- ej. "Proveedores" junta
