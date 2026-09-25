@@ -1050,7 +1050,7 @@ function renderPtoApertura(){
   const debugFiltro=`${etiquetaFiltroApertura(cuenta)} elegido: ${JSON.stringify(grupoSel)} (${grupoSel.length} caracteres) · coincidencias: ${todasT.length} de ${todasTCuenta.length} registros totales de "${esc(cuenta)}"`;
   const notaResumen=cfgResumen?(porCuentaReal
     ?` Primero se abre por cuenta contable real (pesos y USD, nunca mezcladas), luego por Grupo (${cfgResumen.map(b=>b.label).join(", ")}), luego por Módulo y Tipo de comprobante — hacé clic en cada flecha para ver el siguiente nivel.`
-    :` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle por Módulo y Tipo de comprobante.`)
+    :` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle.`)
     :topProveedores?` Se muestran los ${topProveedores} proveedores con más movimiento; el resto se suma en "Otros" (hacé clic en la flecha para ver el detalle) y, más abajo, el resto de los módulos sin desglosar por proveedor.`
     :"";
   document.getElementById("paFoot").innerHTML=`<details><summary style="cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Notas</summary><div style="margin-top:8px">Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span></div></details>`;
@@ -2182,13 +2182,11 @@ const CLASIF_APERTURA_FN={
   // Misma regla que Energía (Compras -> proveedor, resto -> módulo); acá ademas se colapsan los
   // proveedores fuera del top N en una fila "Otros" (ver APERTURA_TOP_PROVEEDORES), porque son muchos.
   "Food & Bev": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
-  // A pedido de Micaela: en Compras, el proveedor se agrupa por categoría de gasto (Combustible /
-  // Peajes / Remises / Estacionamiento, ver APERTURA_PROVEEDOR_CATEGORIA_MOVILIDAD) en vez de mostrar
-  // cada proveedor como su propio Concepto -- son muchos proveedores para una sola categoría de gasto
-  // (ej. 19 estaciones de servicio distintas, todas "Combustible"). Un proveedor que no está en la
-  // lista se muestra con su propio nombre (no se lo esconde ni se lo mete en una categoría al azar).
-  // El resto de los módulos se agrupa solo por módulo, igual que Energía/Food & Bev.
-  "Movilidad Combustible": t=>t.origen==="Compras"?(categoriaProveedorMovilidad(t.razonSocial)||t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  // El Concepto es el proveedor (igual que Food & Bev/Energía); la categoría de gasto (Combustible/
+  // Peajes/Remises/Estacionamiento) se arma visualmente como buckets colapsables por encima de esto
+  // (ver APERTURA_RESUMEN_GRUPO + APERTURA_RESUMEN_CLAVE_FN, que usan categoriaProveedorMovilidad
+  // para saber en qué bucket cae cada proveedor), no achatando el Concepto en la clasificación.
+  "Movilidad Combustible": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
@@ -2227,8 +2225,29 @@ const APERTURA_RESUMEN_GRUPO={
     {label:"Impuestos",grupos:["O) IMPUESTOS"]},
     {label:"Proveedores",prefijo:"P) PROVEEDORES"},
     {label:"Ajustes Cuentas",grupos:["Q) AJUSTES CTAS"]}
+  ],
+  // A pedido de Micaela: que se vea como "Cta Part Socios" -- una fila colapsable por categoria de
+  // gasto (Combustible/Peajes/Remises/Estacionamiento), con los proveedores de esa categoria como
+  // detalle adentro; lo que no es de ninguna categoria (otros modulos, o un proveedor de Compras que
+  // no esta en la lista) cae en su propia fila al final, sin agrupar.
+  "Movilidad Combustible":[
+    {label:"Combustible",grupos:["Combustible"]},
+    {label:"Peajes",grupos:["Peajes"]},
+    {label:"Remises",grupos:["Remises"]},
+    {label:"Estacionamiento",grupos:["Estacionamiento"]}
   ]
 };
+// Como derivar la "clave de bucket" de un Concepto, para las cuentas donde no alcanza con el criterio
+// por defecto (primer segmento antes de " · ", que asume el formato "Grupo · Modulo · Tipo" de Cta
+// Part Socios). "Movilidad Combustible" no tiene ese formato -- el Concepto ES el proveedor (o el
+// modulo, si no es Compras) directamente, asi que la categoria sale de categoriaProveedorMovilidad().
+const APERTURA_RESUMEN_CLAVE_FN={
+  "Movilidad Combustible": k=>categoriaProveedorMovilidad(k)||k
+};
+function claveResumenApertura(cuenta,k){
+  const fn=APERTURA_RESUMEN_CLAVE_FN[cuenta];
+  return fn?(fn(k)||"(sin grupo)"):(k.split(" · ")[0]||"(sin grupo)");
+}
 // A pedido de Micaela: "partis de la cuenta contable, luego del Aux 02, luego del modulo, luego del
 // Tipo de comprobante" -- para estas cuentas virtuales, ANTES de resumir por Grupo/Aux 02 (arriba) se
 // abre primero una fila por cada cuenta REAL (ej. "Cta part Seoane Leandro" y "...  (USD)" por
@@ -2253,7 +2272,7 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefi
   const buckets=cfg.map(b=>({label:b.label,ars:0,n:0,porMes:{},hijos:[]}));
   const extra={}; // codigo Aux 02 no configurado -> su propio bucket, con el codigo como label
   conceptos.forEach(k=>{
-    const grupoReal=k.split(" · ")[0]||"(sin grupo)";
+    const grupoReal=claveResumenApertura(cuenta,k);
     const idx=cfg.findIndex(b=>bucketMatch(b,grupoReal));
     const dest=idx>=0?buckets[idx]:(extra[grupoReal]||(extra[grupoReal]={label:grupoReal,ars:0,n:0,porMes:{},hijos:[]}));
     dest.ars+=grupos[k].ars;
