@@ -2055,6 +2055,10 @@ const APERTURA_CUENTAS_MAP={
   "Energía":["Energía Electrica"],
   "Food & Bev":["Food & Bev"],
   "Movilidad Combustible":["Movilidad Combustible"],
+  // Dos cuentas reales: "(No Usar)" es la vieja (12520000, sin exigir Aux 06 -- por eso no hay dato
+  // de item puntual en esos movimientos) y "(V. Orig)" es la nueva (12520001, creada para poder
+  // exigir el Aux 06 que identifica el bien). Se juntan bajo una sola apertura.
+  "Muebles y Útiles":["Muebles y Utiles (No Usar)","Muebles y Utiles (V. Orig)"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
@@ -2073,7 +2077,11 @@ const APERTURA_GRUPOS_EXCLUIR={"Alquileres":["Q) AJUSTES CTAS"],"Energía":["Q) 
 // Proveedores, Ajustes Ctas) que no corresponden a esta apertura.
 const APERTURA_GRUPOS_PERMITIR={
   "Food & Bev":["K) ESTRUCTURA","K) ESTRUCTURA NQN"],
-  "Movilidad Combustible":["K) ESTRUCTURA","K) ESTRUCTURA NQN"]
+  "Movilidad Combustible":["K) ESTRUCTURA","K) ESTRUCTURA NQN"],
+  // A pedido de Micaela: acá el análisis es específicamente "esto se clasificó como Estructura o
+  // como Inversión" -- P) PROVEEDORES y Q) AJUSTES CTAS quedan afuera a propósito (son las únicas
+  // dos Aux 02 donde "No aplica" es válido en el Aux 06, no algo que haya que analizar acá).
+  "Muebles y Útiles":["K) ESTRUCTURA","M) INVERSIONES"]
 };
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
@@ -2188,6 +2196,11 @@ const CLASIF_APERTURA_FN={
   // (ver APERTURA_RESUMEN_GRUPO + APERTURA_RESUMEN_CLAVE_FN, que usan categoriaProveedorMovilidad
   // para saber en qué bucket cae cada proveedor), no achatando el Concepto en la clasificación.
   "Movilidad Combustible": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  // Misma regla que Energía/Food & Bev (Compras -> proveedor, resto -> módulo). El eje que le importa
+  // a Micaela acá (Estructura vs. Inversión) es el Grupo/Aux 02, que se filtra aparte arriba -- el
+  // Aux 06 (qué bien puntual es) no está disponible todavía (ver aviso en el chat: viene de un
+  // informe de Tango distinto, con Aux 06 en vez de Aux 02, que esta app no ingiere hoy).
+  "Muebles y Útiles": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
