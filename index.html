@@ -2152,6 +2152,10 @@ const APERTURA_CUENTAS_MAP={
   "ART":["ART"],
   "Impuesto sobre Creditos Bancarios Ley 25413":["Impuesto sobre Creditos Bancarios Ley 25413"],
   "Impuesto sobre Debitos Bancarios Ley 25413":["Impuesto sobre Debitos Bancarios Ley 25413"],
+  // Micaela aclaró: "Patentes" sí va en Estructura como cuenta simple propia -- es distinta de
+  // "Patente Automotor RODADOS" (esa es la cuenta nueva que creó específicamente para vehículos, ya
+  // incluida dentro de "Rodados"). "Multas" en cambio queda ligada a Rodados (ver más arriba).
+  "Patentes":["Patentes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
     "Cta part Seoane Leandro (USD)","Cta part Pedretti Gustavo (USD)","Cta part Spinetto Pablo (USD)","Cta part Seoane Micaela (USD)"
@@ -2478,6 +2482,7 @@ const CLASIF_APERTURA_FN={
   "ART": CLASIF_APERTURA_SIMPLE,
   "Impuesto sobre Creditos Bancarios Ley 25413": CLASIF_APERTURA_SIMPLE,
   "Impuesto sobre Debitos Bancarios Ley 25413": CLASIF_APERTURA_SIMPLE,
+  "Patentes": CLASIF_APERTURA_SIMPLE,
   // A pedido de Micaela, funciona parecido a Alquileres: lo que viene de Compras se abre por
   // proveedor (Edesur, EPEN, etc.); el resto de los módulos se agrupa solo por módulo (sin desglosar
   // por proveedor), a diferencia de Alquileres que tira todo lo que no es Compras/Expensas a "Otros".
