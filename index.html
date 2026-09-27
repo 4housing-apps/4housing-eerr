@@ -2103,6 +2103,36 @@ const APERTURA_CUENTAS_MAP={
   // completo son estas 4 cuentas (Mantenimiento, Seguro, y el Amort Acum de "Mejoras s/ Inm 3ros").
   "Mantenimiento Bs de Uso":["Mantenimiento Bs de Uso","Seguro Bienes de Uso","Amort Acum Mejoras s/ Inm 3ros (AJ RT 6)","Amort Acum Mejoras s/ Inm 3ros (V. Orig)"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
+  // Tanda de 26 cuentas simples confirmadas por Micaela: "son todas igual" -- mismo esquema que
+  // Alquileres/Energía (Compras -> Leyenda/proveedor, resto -> Origen/módulo), sin apertura por Grupo
+  // ni por Aux 0N (no son bienes de uso). Un solo nombre real cada una, igual al de Presupuesto·
+  // Estructura (CONFIG_PTO) -- confirmado que las 26 coinciden exacto con esa lista.
+  "Gasto comercial":["Gasto comercial"],
+  "Seguridad Alarmas":["Seguridad Alarmas"],
+  "Recursos Humanos":["Recursos Humanos"],
+  "Honorarios SIG & S&G":["Honorarios SIG & S&G"],
+  "Honorarios Contables":["Honorarios Contables"],
+  "Gastos de Publicidad":["Gastos de Publicidad"],
+  "Comisiones Alquileres":["Comisiones Alquileres"],
+  "Recoleccion Residuos":["Recoleccion Residuos"],
+  "Sistemas":["Sistemas"],
+  "Impuestos y Tasas":["Impuestos y Tasas"],
+  "Honorarios Legales":["Honorarios Legales"],
+  "Seguros":["Seguros"],
+  "Gastos Bancarios":["Gastos Bancarios"],
+  "Gastos varios Taller":["Gastos varios Taller"],
+  "Gs limpieza":["Gs limpieza"],
+  "Honorarios Escribania":["Honorarios Escribania"],
+  "Gs varios oficina":["Gs varios oficina"],
+  "Telefonos":["Telefonos"],
+  "Honorarios Otros":["Honorarios Otros"],
+  "EPP":["EPP"],
+  "Librería e Imprenta":["Librería e Imprenta"],
+  "Gastos de representación":["Gastos de representación"],
+  "Honorarios Arquitectos":["Honorarios Arquitectos"],
+  "Gas":["Gas"],
+  "Mensajeria":["Mensajeria"],
+  "Seguro Accidentes Personales":["Seguro Accidentes Personales"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
     "Cta part Seoane Leandro (USD)","Cta part Pedretti Gustavo (USD)","Cta part Spinetto Pablo (USD)","Cta part Seoane Micaela (USD)"
@@ -2371,6 +2401,10 @@ function categoriaProveedorMovilidad(razonSocial){
 /* Reglas de clasificacion de "Apertura de Estructura": una funcion por cuenta que recibe una
    transaccion (de APERTURA_DETALLE) y devuelve el "Concepto" bajo el que se agrupa en la pantalla.
    Se define codigo por codigo -- avisame para cada cuenta nueva como clasificarla y la agrego ac\u00E1. */
+// Regla "simple" compartida (Compras -> Leyenda/proveedor, resto -> Origen/m\u00F3dulo) -- misma que
+// Energ\u00EDa/Food & Bev/Movilidad Combustible, factoreada para no repetirla en la tanda de 26 cuentas
+// que confirm\u00F3 Micaela con este mismo criterio.
+const CLASIF_APERTURA_SIMPLE=t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin m\u00F3dulo)");
 const CLASIF_APERTURA_FN={
   "Alquileres": t=>{
     if(t.origen==="Compras") return t.razonSocial||"(sin proveedor)";
@@ -2380,6 +2414,35 @@ const CLASIF_APERTURA_FN={
   // A pedido de Micaela: acá el "Concepto" es directamente el módulo de Tango donde se originó el
   // movimiento (Compras, Ventas, ContaParam, Tesorería, etc.), no el proveedor ni ninguna otra regla.
   "Ajustes Cuentas Corrientes": t=>t.origen||"(sin origen)",
+  // Tanda de 26 cuentas simples: "son todas igual. Identificar Origen y luego si es compras la
+  // leyenda, y lo demas detallar el origen solamente" -- misma regla que Energía/Food & Bev, sin
+  // apertura por Grupo ni por Aux 0N.
+  "Gasto comercial": CLASIF_APERTURA_SIMPLE,
+  "Seguridad Alarmas": CLASIF_APERTURA_SIMPLE,
+  "Recursos Humanos": CLASIF_APERTURA_SIMPLE,
+  "Honorarios SIG & S&G": CLASIF_APERTURA_SIMPLE,
+  "Honorarios Contables": CLASIF_APERTURA_SIMPLE,
+  "Gastos de Publicidad": CLASIF_APERTURA_SIMPLE,
+  "Comisiones Alquileres": CLASIF_APERTURA_SIMPLE,
+  "Recoleccion Residuos": CLASIF_APERTURA_SIMPLE,
+  "Sistemas": CLASIF_APERTURA_SIMPLE,
+  "Impuestos y Tasas": CLASIF_APERTURA_SIMPLE,
+  "Honorarios Legales": CLASIF_APERTURA_SIMPLE,
+  "Seguros": CLASIF_APERTURA_SIMPLE,
+  "Gastos Bancarios": CLASIF_APERTURA_SIMPLE,
+  "Gastos varios Taller": CLASIF_APERTURA_SIMPLE,
+  "Gs limpieza": CLASIF_APERTURA_SIMPLE,
+  "Honorarios Escribania": CLASIF_APERTURA_SIMPLE,
+  "Gs varios oficina": CLASIF_APERTURA_SIMPLE,
+  "Telefonos": CLASIF_APERTURA_SIMPLE,
+  "Honorarios Otros": CLASIF_APERTURA_SIMPLE,
+  "EPP": CLASIF_APERTURA_SIMPLE,
+  "Librería e Imprenta": CLASIF_APERTURA_SIMPLE,
+  "Gastos de representación": CLASIF_APERTURA_SIMPLE,
+  "Honorarios Arquitectos": CLASIF_APERTURA_SIMPLE,
+  "Gas": CLASIF_APERTURA_SIMPLE,
+  "Mensajeria": CLASIF_APERTURA_SIMPLE,
+  "Seguro Accidentes Personales": CLASIF_APERTURA_SIMPLE,
   // A pedido de Micaela, funciona parecido a Alquileres: lo que viene de Compras se abre por
   // proveedor (Edesur, EPEN, etc.); el resto de los módulos se agrupa solo por módulo (sin desglosar
   // por proveedor), a diferencia de Alquileres que tira todo lo que no es Compras/Expensas a "Otros".
