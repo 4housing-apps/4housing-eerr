@@ -2055,10 +2055,13 @@ const APERTURA_CUENTAS_MAP={
   "Energía":["Energía Electrica"],
   "Food & Bev":["Food & Bev"],
   "Movilidad Combustible":["Movilidad Combustible"],
-  // Las 3 cuentas reales que Micaela confirmó como las que tienen Aux 06 asociado (identifica el
-  // bien puntual) -- "(No Usar)" (12520000) queda afuera a propósito, es la cuenta vieja que nunca
-  // exigió ese auxiliar.
-  "Muebles y Útiles":["Mantenimiento Muebles y Útiles","Muebles y Utiles (AJ RT 6)","Muebles y Utiles (V. Orig)"],
+  // Las 4 cuentas reales de Muebles y Útiles (confirmado con el archivo que pasó Micaela,
+  // "Muebles_y_utiles.xlsx"): "(No Usar)" (12520000, la vieja), "(V. Orig)" (12520001, la nueva) y
+  // "(AJ RT 6)" (12520002, ajuste RT6) + "Mantenimiento Muebles y Útiles" (52000033). Las 4 clasifican
+  // en Aux 02 (Estructura/Inversión), que es lo que importa para esta apertura -- "(No Usar)" es la
+  // única que nunca tiene Aux 06 (identifica el bien puntual) cargado, pero eso no la excluye del
+  // análisis de Estructura vs. Inversión, solo significa que no va a aportar detalle de Aux 06.
+  "Muebles y Útiles":["Mantenimiento Muebles y Útiles","Muebles y Utiles (AJ RT 6)","Muebles y Utiles (V. Orig)","Muebles y Utiles (No Usar)"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
