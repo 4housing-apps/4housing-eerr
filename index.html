@@ -2649,7 +2649,11 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
     const etiqueta=negrita?`<b>${prefijoHtml||""}${flecha}${esc(label)}</b>`:`${prefijoHtml||""}${flecha}${esc(label)}`;
     const totalCont=negrita?`<b>${fmt(total)}</b>`:fmt(total);
-    const fila=`<tr class="result"><td class="fz fz1" style="${identPx?`padding-left:${identPx}px`:""}">${etiqueta}</td>${cells}<td class="fzr${signoCls(total)}" style="text-align:right">${totalCont}</td><td class="fzr mut" style="text-align:right">${arrTxs.length}</td></tr>`;
+    // A pedido de Micaela: solo las filas "negrita" (subtotal de verdad -- Grupo y Aux 0N) llevan el
+    // fondo/negrita de "result"; la Cuenta contable (Nivel 3) queda con el mismo look liviano que su
+    // propio detalle de Proveedor/Origen (Nivel 4, que nunca tuvo esta clase) -- antes los 3 niveles
+    // se veian identicos y no se notaba a simple vista cual era el subtotal de cual.
+    const fila=`<tr${negrita?" class=\"result\"":""}><td class="fz fz1" style="${identPx?`padding-left:${identPx}px`:""}">${etiqueta}</td>${cells}<td class="fzr${signoCls(total)}" style="text-align:right">${totalCont}</td><td class="fzr mut" style="text-align:right">${arrTxs.length}</td></tr>`;
     return {abierto,fila};
   };
   // Nivel 1: Grupo/Aux 02 (Estructura/Inversión configurados en cfgGrupo; lo que no matchea ningun
@@ -2711,7 +2715,7 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
       const up=reordenable&&idxAux>0?`<span onclick="moverAux0NApertura('${nsEscAux}','${auxEsc}',-1)" title="Subir" style="cursor:pointer;padding:0 2px">▲</span>`:`<span style="opacity:.2;padding:0 2px">▲</span>`;
       const down=reordenable&&idxAux<ultimoReordenable?`<span onclick="moverAux0NApertura('${nsEscAux}','${auxEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
       const flechasOrden=reordenable?`${up}${down} `:"";
-      const {abierto:abiertoAux,fila:filaAux}=filaResumen(claveAux,aux,txsAux,22,false,flechasOrden);
+      const {abierto:abiertoAux,fila:filaAux}=filaResumen(claveAux,aux,txsAux,22,true,flechasOrden);
       if(!abiertoAux) return filaAux;
       // Nivel 3: cuenta contable real.
       const porCuentaReal=agrupar(txsAux,t=>t.cuenta||"(sin cuenta)");
