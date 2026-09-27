@@ -2249,16 +2249,11 @@ const CLASIF_APERTURA_FN={
   // (ver APERTURA_RESUMEN_GRUPO + APERTURA_RESUMEN_CLAVE_FN, que usan categoriaProveedorMovilidad
   // para saber en qué bucket cae cada proveedor), no achatando el Concepto en la clasificación.
   "Movilidad Combustible": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
-  // Misma regla que Energía/Food & Bev (Compras -> proveedor, resto -> módulo); el eje Estructura vs.
-  // Inversión (Aux 02) se filtra aparte arriba. Además, a pedido de Micaela, se agrega el Aux 06 (qué
-  // bien puntual es -- Genérico/No aplica/el bien) al final del Concepto cuando hay match (ver
-  // aux2DescDe/claveAux2) -- así se ve de un vistazo si algo que ya se clasificó como Estructura o
-  // Inversión sigue en Genérico/No aplica en vez de tener el bien identificado.
-  "Muebles y Útiles": t=>{
-    const base=t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)");
-    const aux=aux2DescDe("Muebles y Útiles",t);
-    return aux?`${base} · ${aux}`:base;
-  },
+  // Misma regla que Energía/Food & Bev (Compras -> proveedor, resto -> módulo). El Aux 02
+  // (Estructura/Inversión) y el Aux 06 (Genérico/No aplica/el bien) son ejes de apertura APARTE, no
+  // parte de este Concepto -- ver filasAperturaPorGrupoYCuentaReal, que abre Grupo -> Aux 06 ->
+  // Cuenta contable -> este Concepto (Proveedor si es Compras, si no el módulo de origen).
+  "Muebles y Útiles": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
@@ -2440,17 +2435,32 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
   return filas||"";
 }
 // A pedido de Micaela, igual que su tabla dinámica de "Muebles y Útiles": primero Grupo/Aux 02
-// (Estructura/Inversión, con subtotal y flecha), adentro de cada uno por CUENTA REAL (Mantenimiento/
-// No Usar/V. Orig/AJ RT 6, también con subtotal y flecha), y recién adentro el detalle por proveedor
-// (leaf, sin agrupar más) -- al revés que filasAperturaPorCuentaReal (que abre primero por cuenta
-// real). No reusa esa función porque volvería a bucketizar por Grupo adentro de cada cuenta real
-// (un cuarto nivel de más, ya que acá el Grupo ya se consumió en el primer nivel).
+// (Estructura/Inversión, con subtotal y flecha), adentro de cada uno por AUX 06 (Genérico/No aplica/
+// el bien puntual -- ver aux2DescDe), adentro de cada uno por CUENTA CONTABLE real (Mantenimiento/No
+// Usar/V. Orig/AJ RT 6), y recién adentro el detalle (Proveedor si es Compras, si no el módulo de
+// origen -- eso ya lo resuelve "clasFn"). Los tres niveles intermedios subtotalizan y se abren/
+// cierran con flecha, igual que el resto de Apertura de Estructura.
 function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
-  const porGrupoReal={};
-  txs.forEach(t=>{
-    const g=t.grupo||"(sin grupo)";
-    (porGrupoReal[g]||(porGrupoReal[g]=[])).push(t);
-  });
+  // Agrupa un array de transacciones por una funcion clave, devolviendo {clave:[...]}.
+  const agrupar=(arr,fn)=>{ const out={}; arr.forEach(t=>{ const k=fn(t); (out[k]||(out[k]=[])).push(t); }); return out; };
+  const totalDe=arr=>arr.reduce((s,t)=>s+t.ars,0);
+  const ordenPorImporte=obj=>Object.keys(obj).sort((a,b)=>totalDe(obj[b])-totalDe(obj[a]));
+  // Fila resumen generica (subtotal + flecha), para cualquiera de los 3 niveles con detalle.
+  const filaResumen=(clave,label,arrTxs,identPx,negrita)=>{
+    const total=totalDe(arrTxs);
+    const porMes={}; arrTxs.forEach(t=>{ porMes[t.mes]=(porMes[t.mes]||0)+t.ars; });
+    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+clave];
+    const cells=mesesSel.map(m=>{ const v=porMes[m]||0; const cont=v?fmt(v):"–"; return `<td class="mescol${signoCls(v)}" style="text-align:right">${negrita?`<b>${cont}</b>`:cont}</td>`; }).join("");
+    const cEsc=esc(cuenta).replace(/'/g,"\\'"), clEsc=esc(clave).replace(/'/g,"\\'");
+    const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
+    const etiqueta=negrita?`<b>${flecha}${esc(label)}</b>`:`${flecha}${esc(label)}`;
+    const totalCont=negrita?`<b>${fmt(total)}</b>`:fmt(total);
+    const fila=`<tr class="result"><td class="fz fz1" style="${identPx?`padding-left:${identPx}px`:""}">${etiqueta}</td>${cells}<td class="fzr${signoCls(total)}" style="text-align:right">${totalCont}</td><td class="fzr mut" style="text-align:right">${arrTxs.length}</td></tr>`;
+    return {abierto,fila};
+  };
+  // Nivel 1: Grupo/Aux 02 (Estructura/Inversión configurados en cfgGrupo; lo que no matchea ningun
+  // bucket cae en su propia fila, ordenado por importe, igual que en filasAperturaResumenPorGrupo).
+  const porGrupoReal=agrupar(txs,t=>t.grupo||"(sin grupo)");
   const bucketsGrupo=cfgGrupo.map(b=>({label:b.label,txs:[]}));
   const extraGrupo={};
   Object.keys(porGrupoReal).forEach(g=>{
@@ -2458,58 +2468,45 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     const dest=idx>=0?bucketsGrupo[idx]:(extraGrupo[g]||(extraGrupo[g]={label:g,txs:[]}));
     dest.txs.push(...porGrupoReal[g]);
   });
-  const todosGrupo=[...bucketsGrupo.filter(b=>b.txs.length),...Object.values(extraGrupo).sort((a,b)=>{
-    const totA=a.txs.reduce((s,t)=>s+t.ars,0), totB=b.txs.reduce((s,t)=>s+t.ars,0);
-    return totB-totA;
-  })];
-  const cEsc=esc(cuenta).replace(/'/g,"\\'");
-  const filas=todosGrupo.map(infoGrupo=>{
+  const todosGrupo=[...bucketsGrupo.filter(b=>b.txs.length),...ordenPorImporte(extraGrupo).map(g=>extraGrupo[g])];
+  return todosGrupo.map(infoGrupo=>{
     const txsGrupo=infoGrupo.txs;
-    const totalGrupo=txsGrupo.reduce((s,t)=>s+t.ars,0);
-    const porMesGrupo={}; txsGrupo.forEach(t=>{ porMesGrupo[t.mes]=(porMesGrupo[t.mes]||0)+t.ars; });
     const claveGrupo="GRUPO·"+infoGrupo.label;
-    const abiertoGrupo=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveGrupo];
-    const cellsGrupo=mesesSel.map(m=>{ const v=porMesGrupo[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`; }).join("");
-    const gEsc=esc(claveGrupo).replace(/'/g,"\\'");
-    const flechaGrupo=`<span onclick="toggleResumenApertura('${cEsc}','${gEsc}')" title="${abiertoGrupo?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abiertoGrupo?"▾":"▸"}</span>`;
-    const filaGrupo=`<tr class="result"><td class="fz fz1"><b>${flechaGrupo}${esc(infoGrupo.label)}</b></td>${cellsGrupo}<td class="fzr${signoCls(totalGrupo)}" style="text-align:right"><b>${fmt(totalGrupo)}</b></td><td class="fzr mut" style="text-align:right">${txsGrupo.length}</td></tr>`;
+    const {abierto:abiertoGrupo,fila:filaGrupo}=filaResumen(claveGrupo,infoGrupo.label,txsGrupo,0,true);
     if(!abiertoGrupo) return filaGrupo;
-    const porCuentaReal={};
-    txsGrupo.forEach(t=>{ const cr=t.cuenta||"(sin cuenta)"; (porCuentaReal[cr]||(porCuentaReal[cr]=[])).push(t); });
-    const cuentasReales=Object.keys(porCuentaReal).sort((a,b)=>{
-      const totA=porCuentaReal[a].reduce((s,t)=>s+t.ars,0), totB=porCuentaReal[b].reduce((s,t)=>s+t.ars,0);
-      return totB-totA;
-    });
-    const filasCuentaReal=cuentasReales.map(cr=>{
-      const txsCr=porCuentaReal[cr];
-      const gruposCr={};
-      txsCr.forEach(t=>{
-        const k=clasFn(t)||"Otros";
-        if(!gruposCr[k]) gruposCr[k]={ars:0,n:0,porMes:{}};
-        gruposCr[k].ars+=t.ars; gruposCr[k].n++;
-        gruposCr[k].porMes[t.mes]=(gruposCr[k].porMes[t.mes]||0)+t.ars;
-      });
-      const totalCr=txsCr.reduce((s,t)=>s+t.ars,0);
-      const claveCr=claveGrupo+"·CUENTA·"+cr;
-      const abiertoCr=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveCr];
-      const cellsCr=mesesSel.map(m=>{
-        const v=Object.values(gruposCr).reduce((s,g)=>s+(g.porMes[m]||0),0);
-        return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`;
+    // Nivel 2: Aux 06 (Generico/No aplica/el bien puntual) -- "(sin Aux 06)" para lo que no tiene
+    // fila gemela cargada (ej. todo lo de "Muebles y Utiles (No Usar)").
+    const porAux06=agrupar(txsGrupo,t=>aux2DescDe(cuenta,t)||"(sin Aux 06)");
+    const filasAux06=ordenPorImporte(porAux06).map(aux=>{
+      const txsAux=porAux06[aux];
+      const claveAux=claveGrupo+"·AUX06·"+aux;
+      const {abierto:abiertoAux,fila:filaAux}=filaResumen(claveAux,aux,txsAux,22,false);
+      if(!abiertoAux) return filaAux;
+      // Nivel 3: cuenta contable real.
+      const porCuentaReal=agrupar(txsAux,t=>t.cuenta||"(sin cuenta)");
+      const filasCuentaReal=ordenPorImporte(porCuentaReal).map(cr=>{
+        const txsCr=porCuentaReal[cr];
+        const claveCr=claveAux+"·CUENTA·"+cr;
+        const {abierto:abiertoCr,fila:filaCr}=filaResumen(claveCr,cr,txsCr,44,false);
+        if(!abiertoCr) return filaCr;
+        // Nivel 4 (leaf): Proveedor si es Compras, si no el módulo de origen (clasFn).
+        const gruposCr={};
+        txsCr.forEach(t=>{
+          const k=clasFn(t)||"Otros";
+          if(!gruposCr[k]) gruposCr[k]={ars:0,n:0,porMes:{}};
+          gruposCr[k].ars+=t.ars; gruposCr[k].n++;
+          gruposCr[k].porMes[t.mes]=(gruposCr[k].porMes[t.mes]||0)+t.ars;
+        });
+        const filasHijos=Object.keys(gruposCr).sort((a,b)=>gruposCr[b].ars-gruposCr[a].ars).map(k=>{
+          const cellsH=mesesSel.map(m=>{ const v=gruposCr[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+          return `<tr><td class="fz fz1 ell" style="max-width:none;padding-left:66px" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr${signoCls(gruposCr[k].ars)}" style="text-align:right">${fmt(gruposCr[k].ars)}</td><td class="fzr mut" style="text-align:right">${gruposCr[k].n}</td></tr>`;
+        }).join("");
+        return filaCr+filasHijos;
       }).join("");
-      const crEsc=esc(claveCr).replace(/'/g,"\\'");
-      const flechaCr=`<span onclick="toggleResumenApertura('${cEsc}','${crEsc}')" title="${abiertoCr?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abiertoCr?"▾":"▸"}</span>`;
-      const filaCr=`<tr class="result"><td class="fz fz1" style="padding-left:22px">${flechaCr}${esc(cr)}</td>${cellsCr}<td class="fzr${signoCls(totalCr)}" style="text-align:right">${fmt(totalCr)}</td><td class="fzr mut" style="text-align:right">${txsCr.length}</td></tr>`;
-      if(!abiertoCr) return filaCr;
-      const conceptosCr=Object.keys(gruposCr).sort((a,b)=>gruposCr[b].ars-gruposCr[a].ars);
-      const filasHijos=conceptosCr.map(k=>{
-        const cellsH=mesesSel.map(m=>{ const v=gruposCr[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
-        return `<tr><td class="fz fz1 ell" style="max-width:none;padding-left:44px" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr${signoCls(gruposCr[k].ars)}" style="text-align:right">${fmt(gruposCr[k].ars)}</td><td class="fzr mut" style="text-align:right">${gruposCr[k].n}</td></tr>`;
-      }).join("");
-      return filaCr+filasHijos;
+      return filaAux+filasCuentaReal;
     }).join("");
-    return filaGrupo+filasCuentaReal;
-  }).join("");
-  return filas||"";
+    return filaGrupo+filasAux06;
+  }).join("")||"";
 }
 // Cuentas con muchos proveedores distintos (ej. "Food & Bev"): a pedido de Micaela, Compras se abre
 // por proveedor como siempre, pero solo se listan los N con mas movimiento -- el resto se junta en
