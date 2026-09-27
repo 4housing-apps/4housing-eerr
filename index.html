@@ -857,7 +857,17 @@ function etiquetaFiltroApertura(cuenta){ return APERTURA_FILTRO_FN[cuenta]?"Soci
 // filtro que hace parseRawLedgerCuentas al guardar solo corre de nuevo cuando se sube un archivo
 // nuevo; los datos ya guardados de antes de esa exclusion se quedan como estaban hasta que se filtran
 // aca tambien).
+// "Cuenta" especial (no está en APERTURA_CUENTAS_MAP -- no tiene una lista fija de cuentas reales,
+// es justamente "lo que quedó afuera de todas las demás") para el chequeo de cobertura que pidió
+// Micaela: todas las cuentas reales con algo de Grupo Estructura/NQN en APERTURA_ESTRUCTURA_TOTAL que
+// TODAVÍA no están mapeadas a ninguna Apertura -- ver detalleAperturaCuenta más abajo.
+const APERTURA_COBERTURA_CUENTA="⚠ Estructura sin detalle";
 function detalleAperturaCuenta(cuenta){
+  if(cuenta===APERTURA_COBERTURA_CUENTA){
+    return Object.keys(APERTURA_ESTRUCTURA_TOTAL)
+      .filter(cta=>!APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(cta)])
+      .flatMap(cta=>APERTURA_ESTRUCTURA_TOTAL[cta]);
+  }
   const todo=APERTURA_DETALLE[cuenta]||[];
   const permitir=APERTURA_GRUPOS_PERMITIR[cuenta];
   if(permitir&&permitir.length) return todo.filter(t=>permitir.some(g=>normApertura(g)===normApertura(t.grupo)));
@@ -921,6 +931,7 @@ function debugGruposPorConcepto(cuenta){
 function initPtoApertura(){
   const sel=document.getElementById("paCuenta");
   sel.innerHTML="";APERTURA_CUENTAS.forEach(c=>sel.add(new Option(c,c)));
+  sel.add(new Option(APERTURA_COBERTURA_CUENTA,APERTURA_COBERTURA_CUENTA));
   sel.addEventListener("change",()=>{poblarGrupoApertura();poblarMesesApertura();renderPtoApertura();});
   document.getElementById("paGrupo").addEventListener("change",()=>{poblarMesesApertura();renderPtoApertura();});
   document.getElementById("paDesde").addEventListener("change",renderPtoApertura);
@@ -1056,7 +1067,13 @@ function renderPtoApertura(){
     :` Los conceptos vienen resumidos por Grupo (${cfgResumen.map(b=>b.label).join(", ")}); hacé clic en la flecha de cada uno para ver su detalle.`)
     :topProveedores?` Se muestran los ${topProveedores} proveedores con más movimiento; el resto se suma en "Otros" (hacé clic en la flecha para ver el detalle) y, más abajo, el resto de los módulos sin desglosar por proveedor.`
     :"";
-  document.getElementById("paFoot").innerHTML=`<details><summary style="cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Notas</summary><div style="margin-top:8px">Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span></div></details>`;
+  // "Estructura sin detalle" no es transaccion por transaccion (viene de APERTURA_ESTRUCTURA_TOTAL,
+  // un agregado mensual por cuenta+grupo) -- se aclara aparte para no decir "Asientos"/"transaccion"
+  // donde en realidad es "cuenta+mes con movimiento", que es otra cosa.
+  const encabezadoNota=cuenta===APERTURA_COBERTURA_CUENTA
+    ?`Cuentas reales con Grupo "K) ESTRUCTURA"/"K) ESTRUCTURA NQN" en el crudo que TODAVÍA no están mapeadas en ninguna Apertura de Estructura (ver APERTURA_CUENTAS_MAP) -- si una cuenta que ves acá ya tiene su propia Apertura, revisá que su nombre real esté bien escrito en el mapeo. El desglose es agregado por mes (no transacción por transacción como el resto de esta pantalla) y "Asientos" cuenta combinaciones cuenta+mes con movimiento, no comprobantes.`
+    :`Desglose transacción por transacción del "02-EERR" para "${esc(cuenta)}"${grupoSel?" ("+esc(grupoSel)+")":""}, agrupado por concepto y mes según la regla que definimos para esta cuenta.`;
+  document.getElementById("paFoot").innerHTML=`<details><summary style="cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Notas</summary><div style="margin-top:8px">${encabezadoNota}${notaResumen} La fila "Pto" muestra el presupuesto mensual (suma de los Pto por concepto de más abajo, si ya están cargados; vacío en los meses sin ninguna vigencia todavía) y la fila "Desvío" la diferencia Pto − real de cada mes — en <span class="under">verde</span> cuando el real vino por debajo del Pto, en <span class="over">rojo</span> cuando lo superó; la columna Total de ambas es la suma de los meses que se ven arriba (Desde/Hasta).<br><span class="mut" style="font-size:11px">${esc(etiquetaFiltroApertura(cuenta))} real por concepto (diagnóstico, todos los meses cargados, no solo los de arriba): ${debugTxt||"–"}</span><br><span class="mut" style="font-size:11px">${esc(debugFiltro)}</span></div></details>`;
   renderPtoAperturaPorConcepto(cuenta,grupoSel,mesesSel);
   sincronizarAnchoPtoConcepto();
 }
@@ -1739,17 +1756,19 @@ async function guardarTodoEnSupabase(){
     guardarClave('APERTURA_DETALLE',APERTURA_DETALLE),
     guardarClave('APERTURA_AUX2_DETALLE',APERTURA_AUX2_DETALLE),
     guardarClave('APERTURA_ORDEN',APERTURA_ORDEN),
+    guardarClave('APERTURA_ORDEN_AUX0N',APERTURA_ORDEN_AUX0N),
     guardarClave('APERTURA_PTO',APERTURA_PTO),
+    guardarClave('APERTURA_ESTRUCTURA_TOTAL',APERTURA_ESTRUCTURA_TOTAL),
   ]);
 }
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo,appto,apd2]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo,appto,apd2,apoAux0N,apet]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
     cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
     cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE'),cargarClave('APERTURA_ORDEN'),cargarClave('APERTURA_PTO'),
-    cargarClave('APERTURA_AUX2_DETALLE')
+    cargarClave('APERTURA_AUX2_DETALLE'),cargarClave('APERTURA_ORDEN_AUX0N'),cargarClave('APERTURA_ESTRUCTURA_TOTAL')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -1768,6 +1787,8 @@ async function cargarTodoDesdeSupabase(){
   if(apo){ Object.assign(APERTURA_ORDEN,apo); hubo=true; }
   if(appto){ Object.assign(APERTURA_PTO,appto); hubo=true; }
   if(apd2){ Object.assign(APERTURA_AUX2_DETALLE,apd2); hubo=true; }
+  if(apoAux0N){ Object.assign(APERTURA_ORDEN_AUX0N,apoAux0N); hubo=true; }
+  if(apet){ Object.assign(APERTURA_ESTRUCTURA_TOTAL,apet); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -2202,6 +2223,36 @@ function mergeAperturaIntoData(resCuentas){
     Object.keys(viejoAux2).forEach(k=>{ if(!mesesNuevosAux2.has(viejoAux2[k].mes)) viejoFiltrado[k]=viejoAux2[k]; });
     APERTURA_AUX2_DETALLE[cuenta]={...viejoFiltrado,...nuevoAux2};
   });
+  mergeAperturaEstructuraTotal(resCuentas);
+}
+// Chequeo de cobertura ("¿todo lo que es Aux 02 Estructura está detallado en alguna Apertura?", a
+// pedido de Micaela): a diferencia de APERTURA_DETALLE (transacción por transacción, solo para las
+// cuentas de APERTURA_CUENTAS_MAP), acá guardamos TODAS las cuentas reales con Grupo "K) ESTRUCTURA"/
+// "K) ESTRUCTURA NQN" que trae el archivo -- las tengamos mapeadas o no -- para poder despues mostrar
+// las que NO están en ningún APERTURA_CUENTAS_MAP (ver detalleAperturaCuenta, cuenta especial
+// APERTURA_COBERTURA_CUENTA). Sale de resCuentas.cuentas (el agregado mensual que arma
+// parseRawLedgerCuentas de CUALQUIER cuenta+grupo, no solo de las que ya tenemos mapeadas) -- por eso
+// es agregado por mes, no transacción por transacción como el resto de Apertura de Estructura.
+const APERTURA_ESTRUCTURA_TOTAL={}; // cuenta real -> [{mes,grupo,cuenta,ars,origen:"",...}, ...]
+function mergeAperturaEstructuraTotal(resCuentas){
+  const gruposEstructura=new Set(["K) ESTRUCTURA","K) ESTRUCTURA NQN"]);
+  const nuevoPorCuenta={};
+  Object.keys(resCuentas.cuentas).forEach(k=>{
+    const sep=k.lastIndexOf("␟"), cta=k.slice(0,sep), grp=k.slice(sep+1);
+    if(!gruposEstructura.has(grp)) return;
+    const serie=resCuentas.cuentas[k];
+    Object.keys(serie).forEach(m=>{
+      const ars=serie[m][0]; if(!ars) return;
+      (nuevoPorCuenta[cta]||(nuevoPorCuenta[cta]=[])).push({mes:m,grupo:grp,cuenta:cta,ars:Math.round(ars*100)/100,origen:"",tipoComp:"",comprobante:"",razonSocial:""});
+    });
+  });
+  const mesesArchivo=new Set(resCuentas.meses);
+  new Set([...Object.keys(nuevoPorCuenta),...Object.keys(APERTURA_ESTRUCTURA_TOTAL)]).forEach(cta=>{
+    const nuevo=nuevoPorCuenta[cta]||[];
+    const viejo=(APERTURA_ESTRUCTURA_TOTAL[cta]||[]).filter(t=>!mesesArchivo.has(t.mes));
+    const combinado=[...viejo,...nuevo];
+    if(combinado.length) APERTURA_ESTRUCTURA_TOTAL[cta]=combinado; else delete APERTURA_ESTRUCTURA_TOTAL[cta];
+  });
 }
 // Descripcion del auxiliar secundario (ej. "GENERICO"/"NO APLICA"/el bien puntual) de una transaccion
 // de APERTURA_DETALLE, si tiene una fila gemela con ese auxiliar cargada (ver parseRawLedgerCuentas) --
@@ -2232,6 +2283,35 @@ function moverConceptoApertura(cuenta,concepto,dir){
   renderPtoApertura();
 }
 window.moverConceptoApertura=moverConceptoApertura;
+// Mismo mecanismo que APERTURA_ORDEN, pero para el nivel "Aux 0N" (Nivel 2) de
+// filasAperturaPorGrupoYCuentaReal -- a pedido de Micaela, en Muebles y Útiles/Rodados/Herramientas/
+// Mantenimiento Bs de Uso quiere poder subir/bajar el orden de los auxiliares con flechas, arrancando
+// alfabético por default, y "(sin Aux 0N)" siempre al final (no participa del orden manual: nunca se
+// guarda en este array, se agrega aparte al final en resolverOrdenAux0N).
+// "ns" (namespace) es cuenta+"·"+Grupo (ej. "Herramientas·Estructura"), NO solo la cuenta -- cada
+// Grupo (Estructura/Inversión) tiene sus propios auxiliares y su propio orden independiente; si se
+// guardara todo bajo la cuenta sola, resolver el orden de un Grupo que no tiene ninguno de los
+// auxiliares del otro (ej. Inversión, que a veces solo tiene "(sin Aux 0N)") pisaba con un array vacío
+// el orden ya guardado de Estructura.
+const APERTURA_ORDEN_AUX0N={};
+function resolverOrdenAux0N(ns,clavesDisponibles,sinAuxLabel){
+  const reales=clavesDisponibles.filter(k=>k!==sinAuxLabel);
+  const guardado=(APERTURA_ORDEN_AUX0N[ns]||[]).filter(k=>reales.includes(k));
+  const guardadoSet=new Set(guardado);
+  const resto=reales.filter(k=>!guardadoSet.has(k)).sort((x,y)=>x.localeCompare(y,'es',{sensitivity:'base'}));
+  const orden=[...guardado,...resto];
+  if(JSON.stringify(orden)!==JSON.stringify(APERTURA_ORDEN_AUX0N[ns]||[])){ APERTURA_ORDEN_AUX0N[ns]=orden; guardarClave('APERTURA_ORDEN_AUX0N',APERTURA_ORDEN_AUX0N); }
+  return clavesDisponibles.includes(sinAuxLabel)?[...orden,sinAuxLabel]:orden;
+}
+function moverAux0NApertura(ns,clave,dir){
+  const orden=APERTURA_ORDEN_AUX0N[ns]; if(!orden) return;
+  const i=orden.indexOf(clave); if(i<0) return;
+  const j=i+dir; if(j<0||j>=orden.length) return;
+  [orden[i],orden[j]]=[orden[j],orden[i]];
+  guardarClave('APERTURA_ORDEN_AUX0N',APERTURA_ORDEN_AUX0N);
+  renderPtoApertura();
+}
+window.moverAux0NApertura=moverAux0NApertura;
 // Leyenda -> Definicion que paso Micaela para "Movilidad Combustible": cada codigo de proveedor
 // (columna "Leyenda" del crudo) se agrupa bajo su categoria de gasto. PANAME es Combustible
 // (confirmado -- en la lista original aparecia tambien como Remises por error de tipeo).
@@ -2294,7 +2374,11 @@ const CLASIF_APERTURA_FN={
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
   // Qué cuenta real (socio/moneda) es, se filtra aparte con el selector de arriba (APERTURA_FILTRO_FN).
-  "Cta Part Socios": t=>`${t.grupo||"(sin grupo)"} · ${t.origen||"(sin módulo)"} · ${tipoCompCorto(t.tipoComp)||"(sin tipo)"}`
+  "Cta Part Socios": t=>`${t.grupo||"(sin grupo)"} · ${t.origen||"(sin módulo)"} · ${tipoCompCorto(t.tipoComp)||"(sin tipo)"}`,
+  // El Concepto es directamente la cuenta contable real sin detalle -- es lo único que hace falta ver
+  // acá (no hay proveedor/módulo: APERTURA_ESTRUCTURA_TOTAL es un agregado mensual, no transacción por
+  // transacción, ver mergeAperturaEstructuraTotal).
+  [APERTURA_COBERTURA_CUENTA]: t=>t.cuenta||"(sin cuenta)"
 };
 // El crudo trae el Tipo de comprobante como "CN - Asientos de Contabilidad", "FC - Factura", etc. --
 // a pedido de Micaela se muestra solo el código corto ("CN", "FC") para que la columna Concepto entre
@@ -2497,14 +2581,16 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
   const totalDe=arr=>arr.reduce((s,t)=>s+t.ars,0);
   const ordenPorImporte=obj=>Object.keys(obj).sort((a,b)=>totalDe(obj[b])-totalDe(obj[a]));
   // Fila resumen generica (subtotal + flecha), para cualquiera de los 3 niveles con detalle.
-  const filaResumen=(clave,label,arrTxs,identPx,negrita)=>{
+  // prefijoHtml (opcional): HTML crudo (ej. flechas subir/bajar) que va ANTES de la flecha de
+  // expandir -- no pasa por esc(), a diferencia de label.
+  const filaResumen=(clave,label,arrTxs,identPx,negrita,prefijoHtml)=>{
     const total=totalDe(arrTxs);
     const porMes={}; arrTxs.forEach(t=>{ porMes[t.mes]=(porMes[t.mes]||0)+t.ars; });
     const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+clave];
     const cells=mesesSel.map(m=>{ const v=porMes[m]||0; const cont=v?fmt(v):"–"; return `<td class="mescol${signoCls(v)}" style="text-align:right">${negrita?`<b>${cont}</b>`:cont}</td>`; }).join("");
     const cEsc=esc(cuenta).replace(/'/g,"\\'"), clEsc=esc(clave).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
-    const etiqueta=negrita?`<b>${flecha}${esc(label)}</b>`:`${flecha}${esc(label)}`;
+    const etiqueta=negrita?`<b>${prefijoHtml||""}${flecha}${esc(label)}</b>`:`${prefijoHtml||""}${flecha}${esc(label)}`;
     const totalCont=negrita?`<b>${fmt(total)}</b>`:fmt(total);
     const fila=`<tr class="result"><td class="fz fz1" style="${identPx?`padding-left:${identPx}px`:""}">${etiqueta}</td>${cells}<td class="fzr${signoCls(total)}" style="text-align:right">${totalCont}</td><td class="fzr mut" style="text-align:right">${arrTxs.length}</td></tr>`;
     return {abierto,fila};
@@ -2529,13 +2615,27 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     const claveGrupo="GRUPO·"+infoGrupo.label;
     const {abierto:abiertoGrupo,fila:filaGrupo}=filaResumen(claveGrupo,infoGrupo.label,txsGrupo,0,true);
     if(!abiertoGrupo) return filaGrupo;
-    // Nivel 2: Aux 06 (Generico/No aplica/el bien puntual) -- "(sin Aux 06)" para lo que no tiene
-    // fila gemela cargada (ej. todo lo de "Muebles y Utiles (No Usar)").
-    const porAux06=agrupar(txsGrupo,t=>aux2DescDe(cuenta,t)||"(sin Aux 06)");
-    const filasAux06=ordenPorImporte(porAux06).map(aux=>{
+    // Nivel 2: Aux 0N (Generico/No aplica/el bien puntual) -- el "(sin Aux 0N)" que le corresponde a
+    // esta cuenta (via APERTURA_TIPO_AUX2, ej. "(sin Aux 07)" para Herramientas) para lo que no tiene
+    // fila gemela cargada (ej. todo lo de "Muebles y Utiles (No Usar)"). A pedido de Micaela: orden
+    // alfabético por default, reordenable a mano con flechas (ver APERTURA_ORDEN_AUX0N), y "(sin
+    // Aux 0N)" siempre al final, sin entrar en el orden manual.
+    const numAux0N=(APERTURA_TIPO_AUX2[cuenta]||"").match(/^(\d+)/);
+    const sinAux0N=numAux0N?`(sin Aux ${numAux0N[1]})`:"(sin Aux)";
+    const porAux06=agrupar(txsGrupo,t=>aux2DescDe(cuenta,t)||sinAux0N);
+    // Namespace por Grupo (no solo por cuenta): ver el comentario de APERTURA_ORDEN_AUX0N.
+    const nsAux0N=cuenta+"·"+infoGrupo.label;
+    const ordenAux06=resolverOrdenAux0N(nsAux0N,Object.keys(porAux06),sinAux0N);
+    const filasAux06=ordenAux06.map((aux,idxAux)=>{
       const txsAux=porAux06[aux];
       const claveAux=claveGrupo+"·AUX06·"+aux;
-      const {abierto:abiertoAux,fila:filaAux}=filaResumen(claveAux,aux,txsAux,22,false);
+      const reordenable=aux!==sinAux0N;
+      const nsEscAux=esc(nsAux0N).replace(/'/g,"\\'"), auxEsc=esc(aux).replace(/'/g,"\\'");
+      const ultimoReordenable=ordenAux06.length-(ordenAux06.includes(sinAux0N)?2:1);
+      const up=reordenable&&idxAux>0?`<span onclick="moverAux0NApertura('${nsEscAux}','${auxEsc}',-1)" title="Subir" style="cursor:pointer;padding:0 2px">▲</span>`:`<span style="opacity:.2;padding:0 2px">▲</span>`;
+      const down=reordenable&&idxAux<ultimoReordenable?`<span onclick="moverAux0NApertura('${nsEscAux}','${auxEsc}',1)" title="Bajar" style="cursor:pointer;padding:0 2px">▼</span>`:`<span style="opacity:.2;padding:0 2px">▼</span>`;
+      const flechasOrden=reordenable?`${up}${down} `:"";
+      const {abierto:abiertoAux,fila:filaAux}=filaResumen(claveAux,aux,txsAux,22,false,flechasOrden);
       if(!abiertoAux) return filaAux;
       // Nivel 3: cuenta contable real.
       const porCuentaReal=agrupar(txsAux,t=>t.cuenta||"(sin cuenta)");
