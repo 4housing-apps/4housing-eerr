@@ -972,10 +972,13 @@ function renderPtoApertura(){
   const colTotBase=mesesSel.map((m,i)=>conceptosBase.reduce((s,k)=>s+(grupos[k].porMes[m]||0),0));
   const cfgResumen=APERTURA_RESUMEN_GRUPO[cuenta];
   const porCuentaReal=APERTURA_RESUMEN_POR_CUENTA_REAL[cuenta];
+  const porGrupoYCuentaReal=APERTURA_RESUMEN_POR_GRUPO_Y_CUENTA_REAL[cuenta];
   const topProveedores=APERTURA_TOP_PROVEEDORES[cuenta];
   const filaVacia=`<tr><td colspan="${mesesSel.length+3}" class="mut" style="padding:16px">Sin movimientos en el período elegido.</td></tr>`;
   const rowsHtml=(cfgResumen&&porCuentaReal
     ? filasAperturaPorCuentaReal(cuenta,cfgResumen,txs,clasFn,mesesSel)
+    : cfgResumen&&porGrupoYCuentaReal
+    ? filasAperturaPorGrupoYCuentaReal(cuenta,cfgResumen,txs,clasFn,mesesSel)
     : cfgResumen
     ? filasAperturaResumenPorGrupo(cuenta,cfgResumen,grupos,conceptos,mesesSel)
     : topProveedores
@@ -2304,6 +2307,13 @@ const APERTURA_RESUMEN_GRUPO={
     {label:"Peajes",grupos:["Peajes"]},
     {label:"Remises",grupos:["Remises"]},
     {label:"Estacionamiento",grupos:["Estacionamiento"]}
+  ],
+  // A pedido de Micaela: igual que su tabla dinámica -- Estructura/Inversión primero (con
+  // subtotales), y adentro de cada una, por cuenta real (ver APERTURA_RESUMEN_POR_GRUPO_Y_CUENTA_REAL
+  // + filasAperturaPorGrupoYCuentaReal, que abre en ese orden: al revés que Cta Part Socios).
+  "Muebles y Útiles":[
+    {label:"Estructura",grupos:["K) ESTRUCTURA"]},
+    {label:"Inversión",grupos:["M) INVERSIONES"]}
   ]
 };
 // Como derivar la "clave de bucket" de un Concepto, para las cuentas donde no alcanza con el criterio
@@ -2330,6 +2340,11 @@ const APERTURA_RESUMEN_HIJOS_ALFA={"Movilidad Combustible":true};
 // abre primero una fila por cada cuenta REAL (ej. "Cta part Seoane Leandro" y "...  (USD)" por
 // separado, nunca mezcladas), y recien adentro de cada una se resume por Grupo.
 const APERTURA_RESUMEN_POR_CUENTA_REAL={"Cta Part Socios":true};
+// A pedido de Micaela: para "Muebles y Útiles" el orden es al revés que Cta Part Socios -- primero
+// Grupo/Aux 02 (Estructura/Inversión, con subtotal), y adentro de cada uno, por cuenta real
+// (Mantenimiento/No Usar/V. Orig/AJ RT 6), y recién adentro el detalle por proveedor. Ver
+// filasAperturaPorGrupoYCuentaReal.
+const APERTURA_RESUMEN_POR_GRUPO_Y_CUENTA_REAL={"Muebles y Útiles":true};
 // Que buckets estan expandidos (mostrando su detalle) -- en memoria nomas, no hace falta persistirlo:
 // arranca todo colapsado, que es como Micaela pidio verlo por default.
 const APERTURA_RESUMEN_ABIERTO={};
@@ -2421,6 +2436,78 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
     const filaCuenta=`<tr class="result"><td class="fz fz1"><b>${flecha}${esc(cr)}</b></td>${cells}<td class="fzr${signoCls(totalCr)}" style="text-align:right"><b>${fmt(totalCr)}</b></td><td class="fzr mut" style="text-align:right">${txsCr.length}</td></tr>`;
     if(!abierto) return filaCuenta;
     return filaCuenta+filasAperturaResumenPorGrupo(cuenta,cfg,gruposCr,conceptosCr,mesesSel,claveCr+"·");
+  }).join("");
+  return filas||"";
+}
+// A pedido de Micaela, igual que su tabla dinámica de "Muebles y Útiles": primero Grupo/Aux 02
+// (Estructura/Inversión, con subtotal y flecha), adentro de cada uno por CUENTA REAL (Mantenimiento/
+// No Usar/V. Orig/AJ RT 6, también con subtotal y flecha), y recién adentro el detalle por proveedor
+// (leaf, sin agrupar más) -- al revés que filasAperturaPorCuentaReal (que abre primero por cuenta
+// real). No reusa esa función porque volvería a bucketizar por Grupo adentro de cada cuenta real
+// (un cuarto nivel de más, ya que acá el Grupo ya se consumió en el primer nivel).
+function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
+  const porGrupoReal={};
+  txs.forEach(t=>{
+    const g=t.grupo||"(sin grupo)";
+    (porGrupoReal[g]||(porGrupoReal[g]=[])).push(t);
+  });
+  const bucketsGrupo=cfgGrupo.map(b=>({label:b.label,txs:[]}));
+  const extraGrupo={};
+  Object.keys(porGrupoReal).forEach(g=>{
+    const idx=cfgGrupo.findIndex(b=>bucketMatch(b,g));
+    const dest=idx>=0?bucketsGrupo[idx]:(extraGrupo[g]||(extraGrupo[g]={label:g,txs:[]}));
+    dest.txs.push(...porGrupoReal[g]);
+  });
+  const todosGrupo=[...bucketsGrupo.filter(b=>b.txs.length),...Object.values(extraGrupo).sort((a,b)=>{
+    const totA=a.txs.reduce((s,t)=>s+t.ars,0), totB=b.txs.reduce((s,t)=>s+t.ars,0);
+    return totB-totA;
+  })];
+  const cEsc=esc(cuenta).replace(/'/g,"\\'");
+  const filas=todosGrupo.map(infoGrupo=>{
+    const txsGrupo=infoGrupo.txs;
+    const totalGrupo=txsGrupo.reduce((s,t)=>s+t.ars,0);
+    const porMesGrupo={}; txsGrupo.forEach(t=>{ porMesGrupo[t.mes]=(porMesGrupo[t.mes]||0)+t.ars; });
+    const claveGrupo="GRUPO·"+infoGrupo.label;
+    const abiertoGrupo=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveGrupo];
+    const cellsGrupo=mesesSel.map(m=>{ const v=porMesGrupo[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right"><b>${v?fmt(v):"–"}</b></td>`; }).join("");
+    const gEsc=esc(claveGrupo).replace(/'/g,"\\'");
+    const flechaGrupo=`<span onclick="toggleResumenApertura('${cEsc}','${gEsc}')" title="${abiertoGrupo?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abiertoGrupo?"▾":"▸"}</span>`;
+    const filaGrupo=`<tr class="result"><td class="fz fz1"><b>${flechaGrupo}${esc(infoGrupo.label)}</b></td>${cellsGrupo}<td class="fzr${signoCls(totalGrupo)}" style="text-align:right"><b>${fmt(totalGrupo)}</b></td><td class="fzr mut" style="text-align:right">${txsGrupo.length}</td></tr>`;
+    if(!abiertoGrupo) return filaGrupo;
+    const porCuentaReal={};
+    txsGrupo.forEach(t=>{ const cr=t.cuenta||"(sin cuenta)"; (porCuentaReal[cr]||(porCuentaReal[cr]=[])).push(t); });
+    const cuentasReales=Object.keys(porCuentaReal).sort((a,b)=>{
+      const totA=porCuentaReal[a].reduce((s,t)=>s+t.ars,0), totB=porCuentaReal[b].reduce((s,t)=>s+t.ars,0);
+      return totB-totA;
+    });
+    const filasCuentaReal=cuentasReales.map(cr=>{
+      const txsCr=porCuentaReal[cr];
+      const gruposCr={};
+      txsCr.forEach(t=>{
+        const k=clasFn(t)||"Otros";
+        if(!gruposCr[k]) gruposCr[k]={ars:0,n:0,porMes:{}};
+        gruposCr[k].ars+=t.ars; gruposCr[k].n++;
+        gruposCr[k].porMes[t.mes]=(gruposCr[k].porMes[t.mes]||0)+t.ars;
+      });
+      const totalCr=txsCr.reduce((s,t)=>s+t.ars,0);
+      const claveCr=claveGrupo+"·CUENTA·"+cr;
+      const abiertoCr=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveCr];
+      const cellsCr=mesesSel.map(m=>{
+        const v=Object.values(gruposCr).reduce((s,g)=>s+(g.porMes[m]||0),0);
+        return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`;
+      }).join("");
+      const crEsc=esc(claveCr).replace(/'/g,"\\'");
+      const flechaCr=`<span onclick="toggleResumenApertura('${cEsc}','${crEsc}')" title="${abiertoCr?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abiertoCr?"▾":"▸"}</span>`;
+      const filaCr=`<tr class="result"><td class="fz fz1" style="padding-left:22px">${flechaCr}${esc(cr)}</td>${cellsCr}<td class="fzr${signoCls(totalCr)}" style="text-align:right">${fmt(totalCr)}</td><td class="fzr mut" style="text-align:right">${txsCr.length}</td></tr>`;
+      if(!abiertoCr) return filaCr;
+      const conceptosCr=Object.keys(gruposCr).sort((a,b)=>gruposCr[b].ars-gruposCr[a].ars);
+      const filasHijos=conceptosCr.map(k=>{
+        const cellsH=mesesSel.map(m=>{ const v=gruposCr[k].porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
+        return `<tr><td class="fz fz1 ell" style="max-width:none;padding-left:44px" title="${esc(k)}">${esc(k)}</td>${cellsH}<td class="fzr${signoCls(gruposCr[k].ars)}" style="text-align:right">${fmt(gruposCr[k].ars)}</td><td class="fzr mut" style="text-align:right">${gruposCr[k].n}</td></tr>`;
+      }).join("");
+      return filaCr+filasHijos;
+    }).join("");
+    return filaGrupo+filasCuentaReal;
   }).join("");
   return filas||"";
 }
