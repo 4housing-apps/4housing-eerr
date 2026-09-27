@@ -2155,7 +2155,17 @@ const APERTURA_TIPO_AUX2={
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
-  const cagg={}; const mesesSet=new Set(); const detalle={}; const aux2={};
+  const cagg={}; const mesesSet=new Set(); const detalle={};
+  // aux2Raw guarda TODOS los auxiliares secundarios que comparten clave (cuenta+comprobante+fecha),
+  // sin filtrar todav\u00EDa -- grupoPorClave cuenta, para esa misma clave, cu\u00E1ntos Grupos/Aux 02 DISTINTOS
+  // tiene la fila "02 - EERR" (normalmente 1). Un mismo comprobante puede pagar de una vez varios
+  // bienes (ej. una patente que cubre 11 veh\u00EDculos): ah\u00ED la fila "02 - EERR" viene UNA sola vez
+  // (agregada), pero el auxiliar secundario (ej. "08 - RODADOS") trae una fila POR bien, cada una con
+  // SU PROPIO importe -- esos importes propios son los que hay que usar (no el agregado), pero solo
+  // cuando la clave tiene un \u00FAnico Grupo: si tiene m\u00E1s de uno (ej. una parte "K) ESTRUCTURA" y otra
+  // "P) PROVEEDORES" bajo el mismo comprobante), no hay forma de saber desde el crudo qu\u00E9 bien
+  // corresponde a cada Grupo -- ver el filtro al final de la funci\u00F3n.
+  const aux2Raw={}; const grupoPorClave={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<10) continue;
     const origen=S(r[0]), tipoAux=S(r[1]), cuenta=S(r[9]);
@@ -2171,8 +2181,10 @@ function parseRawLedgerCuentas(rows){
         if(fecha2){
           const y2=fecha2.getUTCFullYear()+"-"+String(fecha2.getUTCMonth()+1).padStart(2,"0");
           const dstr2=y2+"-"+String(fecha2.getUTCDate()).padStart(2,"0");
-          if(!aux2[cuentaApertura2]) aux2[cuentaApertura2]={};
-          aux2[cuentaApertura2][claveAux2(cuenta,S(r[7]),dstr2)]={tipoAux,codigo:S(r[2]),desc:S(r[3]),leyenda:S(r[4]),mes:y2};
+          const k2=claveAux2(cuenta,S(r[7]),dstr2);
+          if(!aux2Raw[cuentaApertura2]) aux2Raw[cuentaApertura2]={};
+          if(!aux2Raw[cuentaApertura2][k2]) aux2Raw[cuentaApertura2][k2]={mes:y2,items:[]};
+          aux2Raw[cuentaApertura2][k2].items.push({desc:S(r[3]),ars:N(r[12])});
         }
       }
       continue;
@@ -2194,8 +2206,22 @@ function parseRawLedgerCuentas(rows){
     if(cuentaApertura && !(APERTURA_GRUPOS_EXCLUIR[cuentaApertura]||[]).some(g=>normApertura(g)===normApertura(grupo))){
       if(!detalle[cuentaApertura]) detalle[cuentaApertura]=[];
       detalle[cuentaApertura].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,cuenta,ars:Math.round(ars*100)/100});
+      const kg=claveAux2(cuenta,comprobante,dstr);
+      (grupoPorClave[kg]||(grupoPorClave[kg]=new Set())).add(grupo);
     }
   }
+  // Filtro final: una clave con m\u00E1s de un Grupo/Aux 02 real (comprobante que mezcla, ej., Estructura
+  // y Proveedores) no se puede partir con confianza -- se descarta entera, y esas transacciones caen
+  // en "(sin Aux 0N)" en vez de arriesgar una atribuci\u00F3n incorrecta (ver comentario m\u00E1s arriba).
+  const aux2={};
+  Object.keys(aux2Raw).forEach(cuentaApertura2=>{
+    aux2[cuentaApertura2]={};
+    Object.keys(aux2Raw[cuentaApertura2]).forEach(k2=>{
+      const grupos=grupoPorClave[k2];
+      if(grupos && grupos.size>1) return;
+      aux2[cuentaApertura2][k2]=aux2Raw[cuentaApertura2][k2];
+    });
+  });
   const out={};
   Object.keys(cagg).forEach(k=>{ const serie={}; Object.keys(cagg[k]).sort().forEach(y=>serie[y]=cagg[k][y].map(v=>Math.round(v*1e4)/1e4)); out[k]=serie; });
   return {cuentas:out, meses:[...mesesSet].sort(), detalle, aux2}; // cuentas: "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
@@ -2256,13 +2282,17 @@ function mergeAperturaEstructuraTotal(resCuentas){
     if(combinado.length) APERTURA_ESTRUCTURA_TOTAL[cta]=combinado; else delete APERTURA_ESTRUCTURA_TOTAL[cta];
   });
 }
-// Descripcion del auxiliar secundario (ej. "GENERICO"/"NO APLICA"/el bien puntual) de una transaccion
-// de APERTURA_DETALLE, si tiene una fila gemela con ese auxiliar cargada (ver parseRawLedgerCuentas) --
-// null si no hay match (ej. "Muebles y Utiles (No Usar)", que nunca lo pedia).
-function aux2DescDe(cuentaVirtual,t){
+// Auxiliares secundarios (ej. "GENERICO"/"NO APLICA"/el bien puntual) de una transaccion de
+// APERTURA_DETALLE, si tiene fila(s) gemela(s) con ese auxiliar cargadas (ver parseRawLedgerCuentas) --
+// null si no hay match (ej. "Muebles y Utiles (No Usar)", que nunca lo pedia, o un comprobante que
+// mezcla mas de un Grupo/Aux 02, que se descarta entero por seguridad -- ver el filtro al final de
+// parseRawLedgerCuentas). Devuelve la lista de {desc,ars} (mas de uno cuando un mismo comprobante
+// paga varios bienes a la vez, ej. una patente que cubre 11 vehiculos -- cada uno con SU PROPIO
+// importe, que sumados dan el importe agregado de "t").
+function aux2ItemsDe(cuentaVirtual,t){
   const mapa=APERTURA_AUX2_DETALLE[cuentaVirtual]; if(!mapa) return null;
   const reg=mapa[claveAux2(t.cuenta,t.comprobante,t.fecha)];
-  return reg?reg.desc:null;
+  return reg?reg.items:null;
 }
 // Orden manual de los "Concepto" de Apertura de Estructura, elegido a mano (flechas subir/bajar) --
 // cuenta -> [concepto, concepto, ...]. Los conceptos que todavia no se ordenaron a mano se agregan
@@ -2598,7 +2628,7 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
 }
 // A pedido de Micaela, igual que su tabla dinámica de "Muebles y Útiles": primero Grupo/Aux 02
 // (Estructura/Inversión, con subtotal y flecha), adentro de cada uno por AUX 06 (Genérico/No aplica/
-// el bien puntual -- ver aux2DescDe), adentro de cada uno por CUENTA CONTABLE real (Mantenimiento/No
+// el bien puntual -- ver aux2ItemsDe), adentro de cada uno por CUENTA CONTABLE real (Mantenimiento/No
 // Usar/V. Orig/AJ RT 6), y recién adentro el detalle (Proveedor si es Compras, si no el módulo de
 // origen -- eso ya lo resuelve "clasFn"). Los tres niveles intermedios subtotalizan y se abren/
 // cierran con flecha, igual que el resto de Apertura de Estructura.
@@ -2649,7 +2679,26 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     // Aux 0N)" siempre al final, sin entrar en el orden manual.
     const numAux0N=(APERTURA_TIPO_AUX2[cuenta]||"").match(/^(\d+)/);
     const sinAux0N=numAux0N?`(sin Aux ${numAux0N[1]})`:"(sin Aux)";
-    const porAux06=agrupar(txsGrupo,t=>aux2DescDe(cuenta,t)||sinAux0N);
+    // Si "t" viene de un comprobante que paga varios bienes a la vez (ej. una patente que cubre 11
+    // vehiculos, agregada en una sola fila "02-EERR"), aux2ItemsDe devuelve MAS DE UN item -- cada uno
+    // se convierte en su propia transaccion (mismo mes/grupo/cuenta/proveedor que "t", pero con SU
+    // PROPIO importe en vez del agregado), para que cada bien muestre lo que realmente le corresponde
+    // en vez de que uno solo se quede con el total agregado (bug real que encontro Micaela con
+    // "Rodados": TIGUAN no aparecia porque su comprobante compartido con otros vehiculos solo dejaba
+    // ver al ultimo que se procesaba). Cuando no hay items (o el comprobante mezcla mas de un Grupo,
+    // ver el filtro en parseRawLedgerCuentas) "t" se deja entero bajo sinAux0N, como antes.
+    const porAux06={};
+    txsGrupo.forEach(t=>{
+      const items=aux2ItemsDe(cuenta,t);
+      if(items&&items.length){
+        items.forEach(it=>{
+          const k=it.desc||sinAux0N;
+          (porAux06[k]||(porAux06[k]=[])).push({...t,ars:it.ars});
+        });
+      }else{
+        (porAux06[sinAux0N]||(porAux06[sinAux0N]=[])).push(t);
+      }
+    });
     // Namespace por Grupo (no solo por cuenta): ver el comentario de APERTURA_ORDEN_AUX0N.
     const nsAux0N=cuenta+"·"+infoGrupo.label;
     const ordenAux06=resolverOrdenAux0N(nsAux0N,Object.keys(porAux06),sinAux0N);
