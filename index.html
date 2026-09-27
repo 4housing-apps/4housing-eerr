@@ -2096,7 +2096,10 @@ const APERTURA_CUENTAS_MAP={
   // gasto asociada(s) (mantenimiento, patente, seguro) + su(s) Amort Acum -- estas últimas solo
   // postean bajo "Q) AJUSTES CTAS" (verificado), así que el filtro Estructura/Inversión de abajo las
   // deja afuera de la vista igual, no hace falta excluirlas acá.
-  "Rodados":["Mantenimiento Rodados","Patente Automotor RODADOS","Seguro Automotor RODADOS","Rodados (V. Orig)","Rodados (No Usar)","Rodados (AJ RT 6)","Amort Acum rodados (AJ RT 6)","Amort Acum rodados (V. Orig)"],
+  // "Multas" se agregó acá a pedido de Micaela ("multas tampoco, debieran ir con Rodados") en vez de
+  // ir con la tanda de cuentas simples -- si trae Aux 08 (vehículo puntual) se va a abrir igual que
+  // el resto; si no, cae en "(sin Aux 08)" como cualquier cuenta de Rodados sin ese dato.
+  "Rodados":["Mantenimiento Rodados","Patente Automotor RODADOS","Seguro Automotor RODADOS","Rodados (V. Orig)","Rodados (No Usar)","Rodados (AJ RT 6)","Amort Acum rodados (AJ RT 6)","Amort Acum rodados (V. Orig)","Multas"],
   "Herramientas":["Mantenimiento Herramientas","Herramientas (V. Orig)","Herramientas (No Usar)","Herramientas (AJ RT 6)","Amort Acum Herramientas (AJ RT 6)","Amort Acum Herramientas (V. Orig)"],
   // Confirmado con Micaela (captura de su filtro "Desc. cuenta"): a diferencia de Rodados/Herramientas/
   // Muebles y Útiles, acá NO hay una cuenta de costo "Bienes de Uso (V. Orig)/(No Usar)" -- el universo
@@ -2133,6 +2136,22 @@ const APERTURA_CUENTAS_MAP={
   "Gas":["Gas"],
   "Mensajeria":["Mensajeria"],
   "Seguro Accidentes Personales":["Seguro Accidentes Personales"],
+  // Segunda tanda, mismo criterio ("son todas igual") -- confirmado sin "Patentes" (la sacó del
+  // pedido original).
+  "Cred. Comp. Imp Ley 25413":["Cred. Comp. Imp Ley 25413"],
+  "Gastos de Asesoramiento y Capacitacion":["Gastos de Asesoramiento y Capacitacion"],
+  "Servicios Profesionales":["Servicios Profesionales"],
+  "Movimiento Modulos Grua":["Movimiento Modulos Grua"],
+  "Int y Rec Impositivos":["Int y Rec Impositivos"],
+  "Gastos de Transporte":["Gastos de Transporte"],
+  "Gastos Extraordinarios":["Gastos Extraordinarios"],
+  "Materiales":["Materiales"],
+  "Gastos generales":["Gastos generales"],
+  "Impuesto Pais":["Impuesto Pais"],
+  "Gastos Mano de Obra":["Gastos Mano de Obra"],
+  "ART":["ART"],
+  "Impuesto sobre Creditos Bancarios Ley 25413":["Impuesto sobre Creditos Bancarios Ley 25413"],
+  "Impuesto sobre Debitos Bancarios Ley 25413":["Impuesto sobre Debitos Bancarios Ley 25413"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
     "Cta part Seoane Leandro (USD)","Cta part Pedretti Gustavo (USD)","Cta part Spinetto Pablo (USD)","Cta part Seoane Micaela (USD)"
@@ -2443,6 +2462,22 @@ const CLASIF_APERTURA_FN={
   "Gas": CLASIF_APERTURA_SIMPLE,
   "Mensajeria": CLASIF_APERTURA_SIMPLE,
   "Seguro Accidentes Personales": CLASIF_APERTURA_SIMPLE,
+  // Segunda tanda, mismo criterio (sin "Patentes" ni "Multas", que quedan afuera de esta lista --
+  // "Multas" se agrupó con Rodados en APERTURA_CUENTAS_MAP).
+  "Cred. Comp. Imp Ley 25413": CLASIF_APERTURA_SIMPLE,
+  "Gastos de Asesoramiento y Capacitacion": CLASIF_APERTURA_SIMPLE,
+  "Servicios Profesionales": CLASIF_APERTURA_SIMPLE,
+  "Movimiento Modulos Grua": CLASIF_APERTURA_SIMPLE,
+  "Int y Rec Impositivos": CLASIF_APERTURA_SIMPLE,
+  "Gastos de Transporte": CLASIF_APERTURA_SIMPLE,
+  "Gastos Extraordinarios": CLASIF_APERTURA_SIMPLE,
+  "Materiales": CLASIF_APERTURA_SIMPLE,
+  "Gastos generales": CLASIF_APERTURA_SIMPLE,
+  "Impuesto Pais": CLASIF_APERTURA_SIMPLE,
+  "Gastos Mano de Obra": CLASIF_APERTURA_SIMPLE,
+  "ART": CLASIF_APERTURA_SIMPLE,
+  "Impuesto sobre Creditos Bancarios Ley 25413": CLASIF_APERTURA_SIMPLE,
+  "Impuesto sobre Debitos Bancarios Ley 25413": CLASIF_APERTURA_SIMPLE,
   // A pedido de Micaela, funciona parecido a Alquileres: lo que viene de Compras se abre por
   // proveedor (Edesur, EPEN, etc.); el resto de los módulos se agrupa solo por módulo (sin desglosar
   // por proveedor), a diferencia de Alquileres que tira todo lo que no es Compras/Expensas a "Otros".
