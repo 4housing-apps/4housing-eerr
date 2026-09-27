@@ -2068,6 +2068,17 @@ const APERTURA_CUENTAS_MAP={
   // única que nunca tiene Aux 06 (identifica el bien puntual) cargado, pero eso no la excluye del
   // análisis de Estructura vs. Inversión, solo significa que no va a aportar detalle de Aux 06.
   "Muebles y Útiles":["Mantenimiento Muebles y Útiles","Muebles y Utiles (AJ RT 6)","Muebles y Utiles (V. Orig)","Muebles y Utiles (No Usar)"],
+  // Mismo patrón que Muebles y Útiles, confirmado con los archivos que pasó Micaela (rodado.xlsx,
+  // herramientas.xlsx, bienes_de_uso.xlsx): "(No Usar)"/"(V. Orig)"/"(AJ RT 6)" + su(s) cuenta(s) de
+  // gasto asociada(s) (mantenimiento, patente, seguro) + su(s) Amort Acum -- estas últimas solo
+  // postean bajo "Q) AJUSTES CTAS" (verificado), así que el filtro Estructura/Inversión de abajo las
+  // deja afuera de la vista igual, no hace falta excluirlas acá.
+  "Rodados":["Mantenimiento Rodados","Patente Automotor RODADOS","Seguro Automotor RODADOS","Rodados (V. Orig)","Rodados (No Usar)","Rodados (AJ RT 6)","Amort Acum rodados (AJ RT 6)","Amort Acum rodados (V. Orig)"],
+  "Herramientas":["Mantenimiento Herramientas","Herramientas (V. Orig)","Herramientas (No Usar)","Herramientas (AJ RT 6)","Amort Acum Herramientas (AJ RT 6)","Amort Acum Herramientas (V. Orig)"],
+  // Confirmado con Micaela (captura de su filtro "Desc. cuenta"): a diferencia de Rodados/Herramientas/
+  // Muebles y Útiles, acá NO hay una cuenta de costo "Bienes de Uso (V. Orig)/(No Usar)" -- el universo
+  // completo son estas 4 cuentas (Mantenimiento, Seguro, y el Amort Acum de "Mejoras s/ Inm 3ros").
+  "Mantenimiento Bs de Uso":["Mantenimiento Bs de Uso","Seguro Bienes de Uso","Amort Acum Mejoras s/ Inm 3ros (AJ RT 6)","Amort Acum Mejoras s/ Inm 3ros (V. Orig)"],
   "Ajustes Cuentas Corrientes":["Ajustes Cuentas Corrientes"],
   "Cta Part Socios":[
     "Cta part Seoane Leandro","Cta part Pedretti Gustavo","Cta part Spinetto Pablo","Cta part Seoane Micaela",
@@ -2090,7 +2101,14 @@ const APERTURA_GRUPOS_PERMITIR={
   // A pedido de Micaela: acá el análisis es específicamente "esto se clasificó como Estructura o
   // como Inversión" -- P) PROVEEDORES y Q) AJUSTES CTAS quedan afuera a propósito (son las únicas
   // dos Aux 02 donde "No aplica" es válido en el Aux 06, no algo que haya que analizar acá).
-  "Muebles y Útiles":["K) ESTRUCTURA","M) INVERSIONES"]
+  "Muebles y Útiles":["K) ESTRUCTURA","M) INVERSIONES"],
+  // Mismo criterio confirmado por Micaela para las 3 cuentas nuevas (Rodados, Herramientas,
+  // Mantenimiento Bs de Uso): Estructura/Inversión es lo que se audita acá, Proveedores/Ajustes Ctas
+  // quedan afuera. A diferencia de Muebles y Útiles, estas 3 sí tienen movimientos reales en
+  // "K) ESTRUCTURA NQN" (Rodados $1,9M, Bienes de Uso $900K) -- se incluye para no perderlos.
+  "Rodados":["K) ESTRUCTURA","K) ESTRUCTURA NQN","M) INVERSIONES"],
+  "Herramientas":["K) ESTRUCTURA","K) ESTRUCTURA NQN","M) INVERSIONES"],
+  "Mantenimiento Bs de Uso":["K) ESTRUCTURA","K) ESTRUCTURA NQN","M) INVERSIONES"]
 };
 // Clave para cruzar una fila "02 - EERR" con su gemela de auxiliar secundario (ej. "06 - MUEBLES Y
 // UTILES"): mismo comprobante + misma cuenta + misma fecha -- verificado contra el archivo real que
@@ -2099,6 +2117,18 @@ const APERTURA_GRUPOS_PERMITIR={
 function claveAux2(cuenta,comprobante,fecha){
   return normApertura(cuenta)+"\u241F"+normApertura(comprobante)+"\u241F"+fecha;
 }
+// Tipo de auxiliar secundario que le corresponde a cada cuenta de Apertura (verificado contra los
+// archivos reales de cada una). Sirve para ignorar un auxiliar secundario DISTINTO que aparezca de
+// paso en la misma cuenta -- ej. en "bienes_de_uso.xlsx" hay 497 filas "05 - MANTENIMIENTO BS DE USO"
+// pero 1 sola fila "03 - INSTRUCTIVO DE FABRICACION" (siempre "NO APLICA", de otro eje de auxiliar
+// que no tiene que ver con este an\u00E1lisis) que comparte cuenta+comprobante+fecha con una fila "05" --
+// sin este filtro, cu\u00E1l de las dos gana depender\u00EDa del orden de las filas en el archivo.
+const APERTURA_TIPO_AUX2={
+  "Muebles y \u00DAtiles":"06 - MUEBLES Y UTILES",
+  "Mantenimiento Bs de Uso":"05 - MANTENIMIENTO BS DE USO",
+  "Herramientas":"07 - HERRAMIENTAS",
+  "Rodados":"08 - RODADOS"
+};
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -2112,7 +2142,8 @@ function parseRawLedgerCuentas(rows){
     // cruzarlo despues con su fila "02 - EERR" gemela via claveAux2().
     if(tipoAux!=="02 - EERR"){
       const cuentaApertura2=APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(cuenta)];
-      if(cuentaApertura2){
+      const tipoEsperado2=cuentaApertura2 && APERTURA_TIPO_AUX2[cuentaApertura2];
+      if(cuentaApertura2 && (!tipoEsperado2 || tipoAux===tipoEsperado2)){
         const fecha2=parseFechaCell(r[5]);
         if(fecha2){
           const y2=fecha2.getUTCFullYear()+"-"+String(fecha2.getUTCMonth()+1).padStart(2,"0");
@@ -2254,6 +2285,11 @@ const CLASIF_APERTURA_FN={
   // parte de este Concepto -- ver filasAperturaPorGrupoYCuentaReal, que abre Grupo -> Aux 06 ->
   // Cuenta contable -> este Concepto (Proveedor si es Compras, si no el módulo de origen).
   "Muebles y Útiles": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  // Mismas 3 cuentas, misma regla (Compras -> proveedor, resto -> módulo) y mismo esquema de apertura
+  // que Muebles y Útiles (Grupo -> Aux 0N -> Cuenta contable -> este Concepto).
+  "Rodados": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  "Herramientas": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  "Mantenimiento Bs de Uso": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
@@ -2309,6 +2345,21 @@ const APERTURA_RESUMEN_GRUPO={
   "Muebles y Útiles":[
     {label:"Estructura",grupos:["K) ESTRUCTURA"]},
     {label:"Inversión",grupos:["M) INVERSIONES"]}
+  ],
+  // Mismo esquema; a diferencia de Muebles y Útiles estas 3 sí tienen movimientos reales en
+  // "K) ESTRUCTURA NQN" (confirmado en rodado.xlsx y bienes_de_uso.xlsx), que entra en el mismo
+  // bucket "Estructura" -- ver APERTURA_GRUPOS_PERMITIR más arriba.
+  "Rodados":[
+    {label:"Estructura",grupos:["K) ESTRUCTURA","K) ESTRUCTURA NQN"]},
+    {label:"Inversión",grupos:["M) INVERSIONES"]}
+  ],
+  "Herramientas":[
+    {label:"Estructura",grupos:["K) ESTRUCTURA","K) ESTRUCTURA NQN"]},
+    {label:"Inversión",grupos:["M) INVERSIONES"]}
+  ],
+  "Mantenimiento Bs de Uso":[
+    {label:"Estructura",grupos:["K) ESTRUCTURA","K) ESTRUCTURA NQN"]},
+    {label:"Inversión",grupos:["M) INVERSIONES"]}
   ]
 };
 // Como derivar la "clave de bucket" de un Concepto, para las cuentas donde no alcanza con el criterio
@@ -2339,7 +2390,7 @@ const APERTURA_RESUMEN_POR_CUENTA_REAL={"Cta Part Socios":true};
 // Grupo/Aux 02 (Estructura/Inversión, con subtotal), y adentro de cada uno, por cuenta real
 // (Mantenimiento/No Usar/V. Orig/AJ RT 6), y recién adentro el detalle por proveedor. Ver
 // filasAperturaPorGrupoYCuentaReal.
-const APERTURA_RESUMEN_POR_GRUPO_Y_CUENTA_REAL={"Muebles y Útiles":true};
+const APERTURA_RESUMEN_POR_GRUPO_Y_CUENTA_REAL={"Muebles y Útiles":true,"Rodados":true,"Herramientas":true,"Mantenimiento Bs de Uso":true};
 // Que buckets estan expandidos (mostrando su detalle) -- en memoria nomas, no hace falta persistirlo:
 // arranca todo colapsado, que es como Micaela pidio verlo por default.
 const APERTURA_RESUMEN_ABIERTO={};
@@ -2468,7 +2519,11 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     const dest=idx>=0?bucketsGrupo[idx]:(extraGrupo[g]||(extraGrupo[g]={label:g,txs:[]}));
     dest.txs.push(...porGrupoReal[g]);
   });
-  const todosGrupo=[...bucketsGrupo.filter(b=>b.txs.length),...ordenPorImporte(extraGrupo).map(g=>extraGrupo[g])];
+  // extraGrupo guarda {label,txs} (no un array de transacciones puro), asi que se ordena aparte --
+  // ordenPorImporte asume que el valor de cada clave YA es el array de transacciones (como en los
+  // niveles 2 y 3 de mas abajo), no le pega a esta forma.
+  const extraGrupoOrdenado=Object.values(extraGrupo).sort((a,b)=>totalDe(b.txs)-totalDe(a.txs));
+  const todosGrupo=[...bucketsGrupo.filter(b=>b.txs.length),...extraGrupoOrdenado];
   return todosGrupo.map(infoGrupo=>{
     const txsGrupo=infoGrupo.txs;
     const claveGrupo="GRUPO·"+infoGrupo.label;
