@@ -2209,16 +2209,18 @@ function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
   const cagg={}; const mesesSet=new Set(); const detalle={};
-  // aux2Raw guarda TODOS los auxiliares secundarios que comparten clave (cuenta+comprobante+fecha),
-  // sin filtrar todav\u00EDa -- grupoPorClave cuenta, para esa misma clave, cu\u00E1ntos Grupos/Aux 02 DISTINTOS
-  // tiene la fila "02 - EERR" (normalmente 1). Un mismo comprobante puede pagar de una vez varios
-  // bienes (ej. una patente que cubre 11 veh\u00EDculos): ah\u00ED la fila "02 - EERR" viene UNA sola vez
-  // (agregada), pero el auxiliar secundario (ej. "08 - RODADOS") trae una fila POR bien, cada una con
-  // SU PROPIO importe -- esos importes propios son los que hay que usar (no el agregado), pero solo
-  // cuando la clave tiene un \u00FAnico Grupo: si tiene m\u00E1s de uno (ej. una parte "K) ESTRUCTURA" y otra
-  // "P) PROVEEDORES" bajo el mismo comprobante), no hay forma de saber desde el crudo qu\u00E9 bien
-  // corresponde a cada Grupo -- ver el filtro al final de la funci\u00F3n.
-  const aux2Raw={}; const grupoPorClave={};
+  // aux2Raw guarda TODOS los auxiliares secundarios que comparten clave (cuenta+comprobante+fecha) --
+  // gruposMontosPorClave guarda, para esa misma clave, el importe de CADA Grupo/Aux 02 real que la usa
+  // (normalmente uno solo). Un mismo comprobante puede pagar de una vez varios bienes (ej. una patente
+  // que cubre 11 veh\u00EDculos): ah\u00ED la fila "02 - EERR" viene UNA sola vez por Grupo (agregada), pero el
+  // auxiliar secundario (ej. "08 - RODADOS") trae una fila POR bien, cada una con SU PROPIO importe.
+  // Cuando la clave tiene un solo Grupo, esos importes propios son directamente los que hay que usar
+  // (no el agregado). Cuando tiene MAS de uno (ej. una parte "K) ESTRUCTURA" y otra "K) ESTRUCTURA NQN"
+  // del mismo comprobante -- confirmado que pasa en Rodados, con vehiculos puntuales asignados a NQN),
+  // se resuelve por importe: si existe un subconjunto de bienes cuya suma da EXACTO el importe de un
+  // Grupo, y es la UNICA forma de lograrlo, esos bienes son de ese Grupo (ver aux2ItemsParaTx). Si no
+  // hay forma segura de partirlo, se cae en "(sin Aux 0N)" -- no se arriesga una atribucion incorrecta.
+  const aux2Raw={}; const gruposMontosPorClave={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<10) continue;
     const origen=S(r[0]), tipoAux=S(r[1]), cuenta=S(r[9]);
@@ -2260,19 +2262,17 @@ function parseRawLedgerCuentas(rows){
       if(!detalle[cuentaApertura]) detalle[cuentaApertura]=[];
       detalle[cuentaApertura].push({mes:y,fecha:dstr,origen,grupo,tipoComp:S(r[6]),razonSocial:S(r[4]),comprobante,cuenta,ars:Math.round(ars*100)/100});
       const kg=claveAux2(cuenta,comprobante,dstr);
-      (grupoPorClave[kg]||(grupoPorClave[kg]=new Set())).add(grupo);
+      if(!gruposMontosPorClave[kg]) gruposMontosPorClave[kg]={};
+      gruposMontosPorClave[kg][grupo]=(gruposMontosPorClave[kg][grupo]||0)+ars;
     }
   }
-  // Filtro final: una clave con m\u00E1s de un Grupo/Aux 02 real (comprobante que mezcla, ej., Estructura
-  // y Proveedores) no se puede partir con confianza -- se descarta entera, y esas transacciones caen
-  // en "(sin Aux 0N)" en vez de arriesgar una atribuci\u00F3n incorrecta (ver comentario m\u00E1s arriba).
+  // A cada clave le agregamos los montos por Grupo que la comparten (gruposMontos) -- si tiene mas de
+  // uno, aux2ItemsParaTx() lo va a necesitar para resolver por importe cual bien es de cual Grupo.
   const aux2={};
   Object.keys(aux2Raw).forEach(cuentaApertura2=>{
     aux2[cuentaApertura2]={};
     Object.keys(aux2Raw[cuentaApertura2]).forEach(k2=>{
-      const grupos=grupoPorClave[k2];
-      if(grupos && grupos.size>1) return;
-      aux2[cuentaApertura2][k2]=aux2Raw[cuentaApertura2][k2];
+      aux2[cuentaApertura2][k2]={...aux2Raw[cuentaApertura2][k2],gruposMontos:gruposMontosPorClave[k2]||{}};
     });
   });
   const out={};
@@ -2335,17 +2335,50 @@ function mergeAperturaEstructuraTotal(resCuentas){
     if(combinado.length) APERTURA_ESTRUCTURA_TOTAL[cta]=combinado; else delete APERTURA_ESTRUCTURA_TOTAL[cta];
   });
 }
-// Auxiliares secundarios (ej. "GENERICO"/"NO APLICA"/el bien puntual) de una transaccion de
-// APERTURA_DETALLE, si tiene fila(s) gemela(s) con ese auxiliar cargadas (ver parseRawLedgerCuentas) --
-// null si no hay match (ej. "Muebles y Utiles (No Usar)", que nunca lo pedia, o un comprobante que
-// mezcla mas de un Grupo/Aux 02, que se descarta entero por seguridad -- ver el filtro al final de
-// parseRawLedgerCuentas). Devuelve la lista de {desc,ars} (mas de uno cuando un mismo comprobante
-// paga varios bienes a la vez, ej. una patente que cubre 11 vehiculos -- cada uno con SU PROPIO
-// importe, que sumados dan el importe agregado de "t").
-function aux2ItemsDe(cuentaVirtual,t){
+// Busca un subconjunto de "items" (array de {desc,ars}) cuya suma de exacto "objetivo" (con
+// tolerancia de $1 por redondeo) -- y que sea la UNICA forma de lograrlo con esos items, para no
+// adivinar cuando hay un empate (ej. dos bienes con el mismo importe, indistinguibles entre si).
+// Acotado a items.length<=20 (en la practica, cuando una clave tiene mas de un Grupo, son unos pocos
+// bienes compartiendo un comprobante) para no explorar de mas.
+function subconjuntoUnicoQueSuma(items,objetivo){
+  const n=items.length;
+  if(n===0||n>20) return null;
+  let encontrado=null,masDeUno=false;
+  for(let mask=1;mask<(1<<n)-1&&!masDeUno;mask++){
+    let suma=0;
+    for(let i=0;i<n;i++) if(mask&(1<<i)) suma+=items[i].ars;
+    if(Math.abs(suma-objetivo)<1){
+      if(encontrado===null) encontrado=mask;
+      else if(mask!==encontrado) masDeUno=true;
+    }
+  }
+  if(masDeUno||encontrado===null) return null;
+  const out=[];
+  for(let i=0;i<n;i++) if(encontrado&(1<<i)) out.push(items[i]);
+  return out;
+}
+// Auxiliares secundarios (ej. "GENERICO"/"NO APLICA"/el bien puntual) que le corresponden a UNA
+// transaccion puntual de APERTURA_DETALLE (con su propio Grupo/Aux 02 y su propio importe), si tiene
+// fila(s) gemela(s) con ese auxiliar cargadas (ver parseRawLedgerCuentas) -- null si no hay match (ej.
+// "Muebles y Utiles (No Usar)", que nunca lo pedia). Devuelve la lista de {desc,ars} (mas de uno
+// cuando un mismo comprobante paga varios bienes a la vez, ej. una patente que cubre 11 vehiculos --
+// cada uno con SU PROPIO importe, que sumados dan el importe agregado de "t").
+//
+// Cuando la clave la comparte mas de un Grupo (ej. una parte "K) ESTRUCTURA" y otra "K) ESTRUCTURA
+// NQN" del mismo comprobante -- confirmado en Rodados, con vehiculos puntuales asignados a NQN), no
+// alcanza con devolver TODOS los items: hay que resolver cuales le tocan a ESTE Grupo puntual. Se
+// busca un subconjunto de items cuya suma de exacto el importe de "t" (subconjuntoUnicoQueSuma) --
+// verificado contra el crudo real de Rodados: en los 12 casos donde esto pasa, siempre hay
+// exactamente un bien cuyo importe propio coincide exacto con el importe de su Grupo. Si no se
+// encuentra una forma unica de partirlo, se devuelve null (cae en "(sin Aux 0N)", sin arriesgar una
+// atribucion incorrecta).
+function aux2ItemsParaTx(cuentaVirtual,t){
   const mapa=APERTURA_AUX2_DETALLE[cuentaVirtual]; if(!mapa) return null;
   const reg=mapa[claveAux2(t.cuenta,t.comprobante,t.fecha)];
-  return reg?reg.items:null;
+  if(!reg) return null;
+  const grupos=Object.keys(reg.gruposMontos||{});
+  if(grupos.length<=1) return reg.items;
+  return subconjuntoUnicoQueSuma(reg.items,t.ars);
 }
 // Orden manual de los "Concepto" de Apertura de Estructura, elegido a mano (flechas subir/bajar) --
 // cuenta -> [concepto, concepto, ...]. Los conceptos que todavia no se ordenaron a mano se agregan
@@ -2561,23 +2594,33 @@ const APERTURA_RESUMEN_GRUPO={
   // A pedido de Micaela: igual que su tabla dinámica -- Estructura/Inversión primero (con
   // subtotales), y adentro de cada una, por cuenta real (ver APERTURA_RESUMEN_POR_GRUPO_Y_CUENTA_REAL
   // + filasAperturaPorGrupoYCuentaReal, que abre en ese orden: al revés que Cta Part Socios).
+  // IMPORTANTE (corregido a pedido de Micaela, se le había pasado por alto): "Estructura" y
+  // "Estructura NQN" son dos ramas SIEMPRE separadas, nunca un solo bucket combinado -- por más que
+  // hoy Muebles y Útiles no tenga movimientos en NQN, se deja igual la rama declarada (por si aparece
+  // en una carga futura) en vez de mezclarla con "Estructura" a secas si algún día aparece.
   "Muebles y Útiles":[
     {label:"Estructura",grupos:["K) ESTRUCTURA"]},
+    {label:"Estructura NQN",grupos:["K) ESTRUCTURA NQN"]},
     {label:"Inversión",grupos:["M) INVERSIONES"]}
   ],
-  // Mismo esquema; a diferencia de Muebles y Útiles estas 3 sí tienen movimientos reales en
-  // "K) ESTRUCTURA NQN" (confirmado en rodado.xlsx y bienes_de_uso.xlsx), que entra en el mismo
-  // bucket "Estructura" -- ver APERTURA_GRUPOS_PERMITIR más arriba.
+  // Estas 3 sí tienen movimientos reales en "K) ESTRUCTURA NQN" (confirmado en rodado.xlsx y
+  // bienes_de_uso.xlsx) -- ej. Rodados tiene una Hilux asignada como costo de Estructura NQN. Antes
+  // esto se combinaba con "Estructura" en un solo bucket; ahora queda como su propia rama, para poder
+  // analizarla individualmente sin perder la posibilidad de verla junto a Estructura (las dos filas
+  // siguen sumando al mismo TOTAL de la cuenta).
   "Rodados":[
-    {label:"Estructura",grupos:["K) ESTRUCTURA","K) ESTRUCTURA NQN"]},
+    {label:"Estructura",grupos:["K) ESTRUCTURA"]},
+    {label:"Estructura NQN",grupos:["K) ESTRUCTURA NQN"]},
     {label:"Inversión",grupos:["M) INVERSIONES"]}
   ],
   "Herramientas":[
-    {label:"Estructura",grupos:["K) ESTRUCTURA","K) ESTRUCTURA NQN"]},
+    {label:"Estructura",grupos:["K) ESTRUCTURA"]},
+    {label:"Estructura NQN",grupos:["K) ESTRUCTURA NQN"]},
     {label:"Inversión",grupos:["M) INVERSIONES"]}
   ],
   "Mantenimiento Bs de Uso":[
-    {label:"Estructura",grupos:["K) ESTRUCTURA","K) ESTRUCTURA NQN"]},
+    {label:"Estructura",grupos:["K) ESTRUCTURA"]},
+    {label:"Estructura NQN",grupos:["K) ESTRUCTURA NQN"]},
     {label:"Inversión",grupos:["M) INVERSIONES"]}
   ]
 };
@@ -2731,7 +2774,7 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
 }
 // A pedido de Micaela, igual que su tabla dinámica de "Muebles y Útiles": primero Grupo/Aux 02
 // (Estructura/Inversión, con subtotal y flecha), adentro de cada uno por AUX 06 (Genérico/No aplica/
-// el bien puntual -- ver aux2ItemsDe), adentro de cada uno por CUENTA CONTABLE real (Mantenimiento/No
+// el bien puntual -- ver aux2ItemsParaTx), adentro de cada uno por CUENTA CONTABLE real (Mantenimiento/No
 // Usar/V. Orig/AJ RT 6), y recién adentro el detalle (Proveedor si es Compras, si no el módulo de
 // origen -- eso ya lo resuelve "clasFn"). Los tres niveles intermedios subtotalizan y se abren/
 // cierran con flecha, igual que el resto de Apertura de Estructura.
@@ -2787,7 +2830,7 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     const numAux0N=(APERTURA_TIPO_AUX2[cuenta]||"").match(/^(\d+)/);
     const sinAux0N=numAux0N?`(sin Aux ${numAux0N[1]})`:"(sin Aux)";
     // Si "t" viene de un comprobante que paga varios bienes a la vez (ej. una patente que cubre 11
-    // vehiculos, agregada en una sola fila "02-EERR"), aux2ItemsDe devuelve MAS DE UN item -- cada uno
+    // vehiculos, agregada en una sola fila "02-EERR"), aux2ItemsParaTx devuelve MAS DE UN item -- cada uno
     // se convierte en su propia transaccion (mismo mes/grupo/cuenta/proveedor que "t", pero con SU
     // PROPIO importe en vez del agregado), para que cada bien muestre lo que realmente le corresponde
     // en vez de que uno solo se quede con el total agregado (bug real que encontro Micaela con
@@ -2796,7 +2839,7 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
     // ver el filtro en parseRawLedgerCuentas) "t" se deja entero bajo sinAux0N, como antes.
     const porAux06={};
     txsGrupo.forEach(t=>{
-      const items=aux2ItemsDe(cuenta,t);
+      const items=aux2ItemsParaTx(cuenta,t);
       if(items&&items.length){
         items.forEach(it=>{
           const k=it.desc||sinAux0N;
