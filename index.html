@@ -1734,6 +1734,7 @@ async function guardarTodoEnSupabase(){
     guardarClave('HIST_LOCK',HIST_LOCK),
     guardarClave('TC_COMPROBANTE_OVERRIDE',TC_COMPROBANTE_OVERRIDE),
     guardarClave('APERTURA_DETALLE',APERTURA_DETALLE),
+    guardarClave('APERTURA_AUX2_DETALLE',APERTURA_AUX2_DETALLE),
     guardarClave('APERTURA_ORDEN',APERTURA_ORDEN),
     guardarClave('APERTURA_PTO',APERTURA_PTO),
   ]);
@@ -1741,10 +1742,11 @@ async function guardarTodoEnSupabase(){
 window.guardarTodoEnSupabase=guardarTodoEnSupabase;
 async function cargarTodoDesdeSupabase(){
   if(!sbClient) return false;
-  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo,appto]=await Promise.all([
+  const [d,cp,pd,ov,pov,pc,poc,ppf,pman,cav,hl,tco,apd,apo,appto,apd2]=await Promise.all([
     cargarClave('DATA'),cargarClave('CONFIG_PTO'),cargarClave('PROJ_DATA'),cargarClave('OVERRIDES'),cargarClave('PROJ_OV'),
     cargarClave('PROY_CTRL'),cargarClave('PROY_CTRL_OC'),cargarClave('PROY_CTRL_PF'),cargarClave('PROY_CTRL_MANUAL'),cargarClave('CMV_AVISOS'),
-    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE'),cargarClave('APERTURA_ORDEN'),cargarClave('APERTURA_PTO')
+    cargarClave('HIST_LOCK'),cargarClave('TC_COMPROBANTE_OVERRIDE'),cargarClave('APERTURA_DETALLE'),cargarClave('APERTURA_ORDEN'),cargarClave('APERTURA_PTO'),
+    cargarClave('APERTURA_AUX2_DETALLE')
   ]);
   let hubo=false;
   if(d&&d.grupos){ DATA.grupos=d.grupos; DATA.meses=d.meses||DATA.meses; hubo=true; }
@@ -1762,6 +1764,7 @@ async function cargarTodoDesdeSupabase(){
   if(apd){ Object.assign(APERTURA_DETALLE,apd); hubo=true; }
   if(apo){ Object.assign(APERTURA_ORDEN,apo); hubo=true; }
   if(appto){ Object.assign(APERTURA_PTO,appto); hubo=true; }
+  if(apd2){ Object.assign(APERTURA_AUX2_DETALLE,apd2); hubo=true; }
   return hubo; // false = todavia no hay nada guardado, se queda con el historico de muestra embebido
 }
 
@@ -2086,14 +2089,39 @@ const APERTURA_GRUPOS_PERMITIR={
   // dos Aux 02 donde "No aplica" es válido en el Aux 06, no algo que haya que analizar acá).
   "Muebles y Útiles":["K) ESTRUCTURA","M) INVERSIONES"]
 };
+// Clave para cruzar una fila "02 - EERR" con su gemela de auxiliar secundario (ej. "06 - MUEBLES Y
+// UTILES"): mismo comprobante + misma cuenta + misma fecha -- verificado contra el archivo real que
+// paso Micaela ("Muebles_y_utiles.xlsx"), donde cada movimiento con auxiliar secundario aparece dos
+// veces en el crudo, una por cada Tipo de auxiliar, con esos tres datos identicos entre ambas filas.
+function claveAux2(cuenta,comprobante,fecha){
+  return normApertura(cuenta)+"\u241F"+normApertura(comprobante)+"\u241F"+fecha;
+}
 function parseRawLedgerCuentas(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
-  const cagg={}; const mesesSet=new Set(); const detalle={};
+  const cagg={}; const mesesSet=new Set(); const detalle={}; const aux2={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<10) continue;
-    const origen=S(r[0]), tipoAux=S(r[1]), grupo=S(r[3]), cuenta=S(r[9]);
-    if(tipoAux!=="02 - EERR"||!GRUPO_MOVIM[grupo]) continue;
+    const origen=S(r[0]), tipoAux=S(r[1]), cuenta=S(r[9]);
+    // Auxiliar secundario (Tipo de auxiliar != "02 - EERR", ej. "06 - MUEBLES Y UTILES" -- que bien
+    // puntual es un movimiento de Muebles y Utiles). No pasa por GRUPO_MOVIM porque su "Desc.
+    // auxiliar" (Generico/No aplica/el bien) no es un codigo de Aux 02 -- se guarda aparte, para
+    // cruzarlo despues con su fila "02 - EERR" gemela via claveAux2().
+    if(tipoAux!=="02 - EERR"){
+      const cuentaApertura2=APERTURA_CUENTA_REAL_A_VIRTUAL[normApertura(cuenta)];
+      if(cuentaApertura2){
+        const fecha2=parseFechaCell(r[5]);
+        if(fecha2){
+          const y2=fecha2.getUTCFullYear()+"-"+String(fecha2.getUTCMonth()+1).padStart(2,"0");
+          const dstr2=y2+"-"+String(fecha2.getUTCDate()).padStart(2,"0");
+          if(!aux2[cuentaApertura2]) aux2[cuentaApertura2]={};
+          aux2[cuentaApertura2][claveAux2(cuenta,S(r[7]),dstr2)]={tipoAux,codigo:S(r[2]),desc:S(r[3]),leyenda:S(r[4]),mes:y2};
+        }
+      }
+      continue;
+    }
+    const grupo=S(r[3]);
+    if(!GRUPO_MOVIM[grupo]) continue;
     const fecha=parseFechaCell(r[5]); if(!fecha) continue;
     const y=fecha.getUTCFullYear()+"-"+String(fecha.getUTCMonth()+1).padStart(2,"0");
     mesesSet.add(y);
@@ -2113,9 +2141,13 @@ function parseRawLedgerCuentas(rows){
   }
   const out={};
   Object.keys(cagg).forEach(k=>{ const serie={}; Object.keys(cagg[k]).sort().forEach(y=>serie[y]=cagg[k][y].map(v=>Math.round(v*1e4)/1e4)); out[k]=serie; });
-  return {cuentas:out, meses:[...mesesSet].sort(), detalle}; // cuentas: "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
+  return {cuentas:out, meses:[...mesesSet].sort(), detalle, aux2}; // cuentas: "cuenta\u241Fgrupo" -> {mes:[ars,usdOfic,usdBill,axi]}
 }
 const APERTURA_DETALLE={}; // cuenta -> [ {mes,fecha,origen,tipoComp,razonSocial,comprobante,ars}, ... ]
+// cuenta -> { claveAux2(cuenta,comprobante,fecha) -> {tipoAux,codigo,desc,leyenda,mes} }. Detalle del
+// auxiliar secundario (ej. "06 - MUEBLES Y UTILES") de las cuentas que lo tienen -- ver claveAux2 y
+// el parseo en parseRawLedgerCuentas para como se cruza con APERTURA_DETALLE.
+const APERTURA_AUX2_DETALLE={};
 function mergeAperturaIntoData(resCuentas){
   // A diferencia del resto de la app, el detalle de Apertura de Estructura NO respeta HIST_LOCK:
   // es informacion complementaria para mirar de que se compone una cuenta, no toca ninguno de los
@@ -2128,7 +2160,22 @@ function mergeAperturaIntoData(resCuentas){
     const mesesNuevos=new Set(nuevo.map(t=>t.mes));
     const viejo=(APERTURA_DETALLE[cuenta]||[]).filter(t=>!mesesNuevos.has(t.mes));
     APERTURA_DETALLE[cuenta]=[...viejo,...nuevo];
+    // Mismo criterio de reemplazo por mes, para el auxiliar secundario.
+    const nuevoAux2=resCuentas.aux2[cuenta]||{};
+    const mesesNuevosAux2=new Set(Object.values(nuevoAux2).map(v=>v.mes));
+    const viejoAux2=APERTURA_AUX2_DETALLE[cuenta]||{};
+    const viejoFiltrado={};
+    Object.keys(viejoAux2).forEach(k=>{ if(!mesesNuevosAux2.has(viejoAux2[k].mes)) viejoFiltrado[k]=viejoAux2[k]; });
+    APERTURA_AUX2_DETALLE[cuenta]={...viejoFiltrado,...nuevoAux2};
   });
+}
+// Descripcion del auxiliar secundario (ej. "GENERICO"/"NO APLICA"/el bien puntual) de una transaccion
+// de APERTURA_DETALLE, si tiene una fila gemela con ese auxiliar cargada (ver parseRawLedgerCuentas) --
+// null si no hay match (ej. "Muebles y Utiles (No Usar)", que nunca lo pedia).
+function aux2DescDe(cuentaVirtual,t){
+  const mapa=APERTURA_AUX2_DETALLE[cuentaVirtual]; if(!mapa) return null;
+  const reg=mapa[claveAux2(t.cuenta,t.comprobante,t.fecha)];
+  return reg?reg.desc:null;
 }
 // Orden manual de los "Concepto" de Apertura de Estructura, elegido a mano (flechas subir/bajar) --
 // cuenta -> [concepto, concepto, ...]. Los conceptos que todavia no se ordenaron a mano se agregan
@@ -2199,11 +2246,16 @@ const CLASIF_APERTURA_FN={
   // (ver APERTURA_RESUMEN_GRUPO + APERTURA_RESUMEN_CLAVE_FN, que usan categoriaProveedorMovilidad
   // para saber en qué bucket cae cada proveedor), no achatando el Concepto en la clasificación.
   "Movilidad Combustible": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
-  // Misma regla que Energía/Food & Bev (Compras -> proveedor, resto -> módulo). El eje que le importa
-  // a Micaela acá (Estructura vs. Inversión) es el Grupo/Aux 02, que se filtra aparte arriba -- el
-  // Aux 06 (qué bien puntual es) no está disponible todavía (ver aviso en el chat: viene de un
-  // informe de Tango distinto, con Aux 06 en vez de Aux 02, que esta app no ingiere hoy).
-  "Muebles y Útiles": t=>t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)"),
+  // Misma regla que Energía/Food & Bev (Compras -> proveedor, resto -> módulo); el eje Estructura vs.
+  // Inversión (Aux 02) se filtra aparte arriba. Además, a pedido de Micaela, se agrega el Aux 06 (qué
+  // bien puntual es -- Genérico/No aplica/el bien) al final del Concepto cuando hay match (ver
+  // aux2DescDe/claveAux2) -- así se ve de un vistazo si algo que ya se clasificó como Estructura o
+  // Inversión sigue en Genérico/No aplica en vez de tener el bien identificado.
+  "Muebles y Útiles": t=>{
+    const base=t.origen==="Compras"?(t.razonSocial||"(sin proveedor)"):(t.origen||"(sin módulo)");
+    const aux=aux2DescDe("Muebles y Útiles",t);
+    return aux?`${base} · ${aux}`:base;
+  },
   // A pedido de Micaela: "el dato fundamental es si es gasto de Estructura, Impuestos, Proveedores,
   // Proveedores LDS o Ajustes Ctas [el Grupo/Aux 02] -- luego de ahí se abre en Módulo y Tipo de
   // comprobante". El Grupo va primero en el Concepto para que sea lo más visible al ordenar/leer.
