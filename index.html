@@ -290,6 +290,8 @@ table.grid th .col-resizer:hover,table.grid th .col-resizer.active{background:rg
       <div class="ctl"><label for="paHasta">Hasta</label><select id="paHasta"></select></div>
       <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="ultimoAnioApertura()">Último año</button></div>
       <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="autoFitTable('paTabla')">Ajustar columnas</button></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="expandirTodoApertura()">Expandir todo</button></div>
+      <div class="ctl"><label>&nbsp;</label><button class="btn" onclick="contraerTodoApertura()">Contraer todo</button></div>
       <span class="note">Desglose transacción por transacción del crudo "02-EERR" para esta cuenta, agrupado por concepto. Se va agregando cuenta por cuenta, a pedido.</span>
     </div>
     <div class="kpis" id="paKpis"></div>
@@ -2483,6 +2485,31 @@ function toggleResumenApertura(cuenta,bucket){
   APERTURA_RESUMEN_ABIERTO[k]=!APERTURA_RESUMEN_ABIERTO[k];
   renderPtoApertura();
 }
+// "Expandir todo"/"Contraer todo" (a pedido de Micaela, para no tener que ir abriendo cada flecha una
+// por una en cuentas con muchos niveles como Mantenimiento Bs de Uso). APERTURA_FORZAR_ABIERTO es un
+// flag transitorio que se prende solo durante UN render: mientras esta prendido, cada nivel se
+// considera abierto (y de paso queda GUARDADO como abierto en APERTURA_RESUMEN_ABIERTO), asi que
+// despues de "Expandir todo" las flechas individuales se pueden volver a cerrar una por una con total
+// normalidad -- no es un modo aparte que haya que "salir", es como si hubieras hecho clic en todas.
+let APERTURA_FORZAR_ABIERTO=false;
+function estaAbiertoApertura(cuenta,clave){
+  const k=cuenta+"|"+clave;
+  if(APERTURA_FORZAR_ABIERTO){ APERTURA_RESUMEN_ABIERTO[k]=true; return true; }
+  return !!APERTURA_RESUMEN_ABIERTO[k];
+}
+function expandirTodoApertura(){
+  APERTURA_FORZAR_ABIERTO=true;
+  renderPtoApertura();
+  APERTURA_FORZAR_ABIERTO=false;
+}
+window.expandirTodoApertura=expandirTodoApertura;
+function contraerTodoApertura(){
+  const cuenta=document.getElementById("paCuenta").value;
+  const prefijo=cuenta+"|";
+  Object.keys(APERTURA_RESUMEN_ABIERTO).forEach(k=>{ if(k.startsWith(prefijo)) delete APERTURA_RESUMEN_ABIERTO[k]; });
+  renderPtoApertura();
+}
+window.contraerTodoApertura=contraerTodoApertura;
 window.toggleResumenApertura=toggleResumenApertura;
 function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefijoClave){
   prefijoClave=prefijoClave||"";
@@ -2508,7 +2535,7 @@ function filasAperturaResumenPorGrupo(cuenta,cfg,grupos,conceptos,mesesSel,prefi
     // La clave de expandido incluye el prefijo (ej. la cuenta real ARS/USD) para que "Estructura" de
     // una cuenta no se abra/cierre junto con "Estructura" de la otra -- son secciones independientes.
     const claveBucket=prefijoClave+info.label;
-    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveBucket];
+    const abierto=estaAbiertoApertura(cuenta,claveBucket);
     const cells=mesesSel.map(m=>{ const v=info.porMes[m]||0; return `<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`; }).join("");
     const bEsc=esc(claveBucket).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${bEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
@@ -2559,7 +2586,7 @@ function filasAperturaPorCuentaReal(cuenta,cfg,txs,clasFn,mesesSel){
     const totalCr=conceptosCr.reduce((s,k)=>s+gruposCr[k].ars,0);
     const colTotCr=mesesSel.map(m=>conceptosCr.reduce((s,k)=>s+(gruposCr[k].porMes[m]||0),0));
     const claveCr="CUENTA·"+cr;
-    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveCr];
+    const abierto=estaAbiertoApertura(cuenta,claveCr);
     const cells=colTotCr.map(v=>`<td class="mescol${signoCls(v)}" style="text-align:right">${v?fmt(v):"–"}</td>`).join("");
     const clEsc=esc(claveCr).replace(/'/g,"\\'"), cEsc=esc(cuenta).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
@@ -2586,7 +2613,7 @@ function filasAperturaPorGrupoYCuentaReal(cuenta,cfgGrupo,txs,clasFn,mesesSel){
   const filaResumen=(clave,label,arrTxs,identPx,negrita,prefijoHtml)=>{
     const total=totalDe(arrTxs);
     const porMes={}; arrTxs.forEach(t=>{ porMes[t.mes]=(porMes[t.mes]||0)+t.ars; });
-    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+clave];
+    const abierto=estaAbiertoApertura(cuenta,clave);
     const cells=mesesSel.map(m=>{ const v=porMes[m]||0; const cont=v?fmt(v):"–"; return `<td class="mescol${signoCls(v)}" style="text-align:right">${negrita?`<b>${cont}</b>`:cont}</td>`; }).join("");
     const cEsc=esc(cuenta).replace(/'/g,"\\'"), clEsc=esc(clave).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${clEsc}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
@@ -2681,7 +2708,7 @@ function filasAperturaTopProveedores(cuenta,grupos,conceptos,mesesSel,topN){
   let html=top.map(k=>filaConcepto(k,false)).join("");
   if(resto.length){
     const claveOtros="__otros_proveedores__";
-    const abierto=!!APERTURA_RESUMEN_ABIERTO[cuenta+"|"+claveOtros];
+    const abierto=estaAbiertoApertura(cuenta,claveOtros);
     const cEsc=esc(cuenta).replace(/'/g,"\\'");
     const flecha=`<span onclick="toggleResumenApertura('${cEsc}','${claveOtros}')" title="${abierto?"Ocultar":"Ver"} detalle" style="cursor:pointer;padding:0 4px">${abierto?"▾":"▸"}</span>`;
     const totalOtros=resto.reduce((s,k)=>s+grupos[k].ars,0), nOtros=resto.reduce((s,k)=>s+grupos[k].n,0);
