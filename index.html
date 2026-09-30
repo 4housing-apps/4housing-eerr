@@ -1605,7 +1605,12 @@ let HIST_CAMBIARIO = JSON.parse(JSON.stringify(HIST_CAMBIARIO_FALLBACK));
 const SB_URL='https://aaqpzamcdxldhqyuqlgm.supabase.co';
 const SB_KEY='sb_publishable_WCez44YAKCcOOAJ8hCDe5Q_8IC5Ckpx';
 const SB_REST=SB_URL+'/rest/v1';
-const REDIRECT_URL='https://4housing-apps.github.io/4housing-eerr/'; // GitHub Pages (para el login Azure)
+const REDIRECT_URL='https://4housing.github.io/4housing-eerr/'; // GitHub Pages (para el login Azure)
+/* 2026-09-30: el repo se transfirió de 4housing-apps/4housing-eerr a 4housing/4housing-eerr, así que el
+   deploy pasó de 4housing-apps.github.io a 4housing.github.io. Esta URL tiene que estar en la lista de
+   Redirect URLs de Supabase Auth (proyecto aaqpzamcdxldhqyuqlgm); si no está, Supabase ignora el
+   redirectTo y manda al usuario al Site URL por defecto después del login. El link de la tarjeta
+   "Gestión · EERR" vive en el repo 4housing/portal (index.html, array MODULOS). */
 
 /* ===== Login (Microsoft/Azure vía Supabase Auth) — mismo mecanismo que Compras, mismo proyecto ===== */
 let sbClient=null, AUTH_USER=null;
