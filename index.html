@@ -1602,13 +1602,13 @@ let HIST_CAMBIARIO = JSON.parse(JSON.stringify(HIST_CAMBIARIO_FALLBACK));
      - USD Oficial: siempre TC venta.
      - USD Billete: TC venta hasta el 31/08/2026; promedio(compra,venta) desde el 01/09/2026 en adelante
        (misma regla que ya tenia el historico embebido). */
-const SB_URL='https://aaqpzamcdxldhqyuqlgm.supabase.co';
-const SB_KEY='sb_publishable_WCez44YAKCcOOAJ8hCDe5Q_8IC5Ckpx';
+const SB_URL='https://wcpkpwxhqdcdljfwzcmy.supabase.co';
+const SB_KEY='sb_publishable_08decRYdCRUdtO5zogvJVg_VEBCN9pf';
 const SB_REST=SB_URL+'/rest/v1';
 const REDIRECT_URL='https://4housing.github.io/4housing-eerr/'; // GitHub Pages (para el login Azure)
 /* 2026-09-30: el repo se transfirió de 4housing-apps/4housing-eerr a 4housing/4housing-eerr, así que el
    deploy pasó de 4housing-apps.github.io a 4housing.github.io. Esta URL tiene que estar en la lista de
-   Redirect URLs de Supabase Auth (proyecto aaqpzamcdxldhqyuqlgm); si no está, Supabase ignora el
+   Redirect URLs de Supabase Auth (proyecto unificado wcpkpwxhqdcdljfwzcmy); si no está, Supabase ignora el
    redirectTo y manda al usuario al Site URL por defecto después del login. El link de la tarjeta
    "Gestión · EERR" vive en el repo 4housing/portal (index.html, array MODULOS). */
 
@@ -1817,9 +1817,9 @@ async function sbFetchAllPublic(table, orderCol){
 async function cargarDiccionarioSupabase(){
   try{
     const [ofic,bill,facpce]=await Promise.all([
-      sbFetchAllPublic('usd_diario_oficial','fecha'),
-      sbFetchAllPublic('usd_diario','fecha'),
-      sbFetchAllPublic('idx_facpce','periodo'),
+      sbFetchAllPublic('compras_usd_diario_oficial','fecha'),
+      sbFetchAllPublic('compras_usd_diario','fecha'),
+      sbFetchAllPublic('compras_idx_facpce','periodo'),
     ]);
     if(!ofic.length&&!bill.length&&!facpce.length) throw new Error('tablas vacias o inexistentes todavia');
     const oficMap={}, billMap={}, facpceMap={}, oficRaw={}, billRaw={};
@@ -1861,7 +1861,7 @@ async function cargarClasifProyectosSupabase(){
     // clasif_renglon es la tabla que ya usa Compras (motor de asiento por clasificacion, con
     // su propia pantalla de edicion); EERR la lee de solo lectura para quedar alineado con la
     // misma fuente. Reemplaza a la vieja clasif_proyecto_eerr, que ya no se usa.
-    const rows=await sbFetchAllPublic('clasif_renglon','codigo');
+    const rows=await sbFetchAllPublic('compras_clasif_renglon','codigo');
     if(!rows.length) throw new Error('tabla vacia o inexistente todavia');
     const mapa={}; rows.forEach(r=>{ if(r.codigo&&r.eerr) mapa[r.codigo]=r.eerr; });
     Object.assign(CLASIF_PROY_EERR,mapa);
@@ -3801,6 +3801,22 @@ async function onCargarInformeCrudo(file){
 (async function start(){
   const ok=await initAuth();
   if(!ok) return; // pantalla de login ya mostrada
+  // Compuerta de sector (portal): EERR está gateado por tiene_sector('eerr').
+  // Sin el sector, el RLS devuelve vacío eerr_estado (que sí tiene datos).
+  try{
+    let tok=SB_KEY;
+    try{ const {data}=await sbClient.auth.getSession(); if(data&&data.session&&data.session.access_token) tok=data.session.access_token; }catch(_){}
+    const r=await fetch(SB_REST+'/eerr_estado?select=clave&limit=1',{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+tok}});
+    const rows=r.ok?await r.json():[];
+    if(!rows.length){
+      authScreen('Tu usuario no tiene acceso al módulo de EERR.<br><span style="font-size:12px;color:#94917f">Pedile a dirección que te habilite el sector «eerr» en el portal.</span>');
+      return;
+    }
+  }catch(e){
+    authScreen('No se pudo verificar el acceso. Reintentá.','Reintentar');
+    setTimeout(()=>{const b=document.getElementById('authBtn');if(b)b.onclick=()=>location.reload();},50);
+    return;
+  }
   await cargarTodoDesdeSupabase();
   if(loadAperturaPtoSeed()) saveAperturaPto();
   if(migrarPtoEnergiaAux02()) saveAperturaPto();
