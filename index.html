@@ -1800,11 +1800,17 @@ async function cargarTodoDesdeSupabase(){
 }
 
 const BILL_CORTE_PROMEDIO='2026-09-01'; // desde esta fecha, USD Billete pasa a promedio compra/venta
+/* 2026-10-02: desde la migracion a wcpk (29/09) las tablas compras_* (usd_diario, usd_diario_oficial,
+   idx_facpce, clasif_renglon) tienen RLS solo para `authenticated` con sector compras/eerr (anon revocado,
+   ver 4housing/portal sql/compras/110_esquema_compras.sql, seccion 5.b). Antes este helper mandaba
+   'Bearer '+SB_KEY (rol anon) y Supabase lo rechazaba, asi que la app caia siempre al historico embebido
+   ("No se pudo leer el diccionario de Supabase"). Ahora usa el token de la sesion del usuario logueado. */
 async function sbFetchAllPublic(table, orderCol){
   const page=1000; let offset=0, all=[];
+  const token=await authToken();
   for(let i=0;i<30;i++){
     const url=SB_REST+'/'+table+'?select=*&order='+orderCol+'.asc&limit='+page+'&offset='+offset;
-    const res=await fetch(url,{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY}});
+    const res=await fetch(url,{headers:{'apikey':SB_KEY,'Authorization':'Bearer '+token}});
     if(!res.ok) throw new Error('Supabase '+res.status+' leyendo '+table);
     const chunk=await res.json();
     if(!chunk||!chunk.length) break;
