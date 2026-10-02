@@ -3235,6 +3235,73 @@ function mergeProyCtrlIntoData(res){
    tabla es la fuente real y unica para ambas apps. */
 const A_VENTA_CMV=new Set(["A) VENTA","A) CMV VENTA"]);
 const CLASIF_PROY_EERR={"A- STOCK":"B) COSTO ALQUILER MODULO","SUBALQ":"B) COSTO ALQUILER MODULO","VENAM":"A) CMV VENTA","ACOPIO":"A) CMV VENTA","CONSUM":"A) CMV VENTA","AJUSTE":"P) PROVEEDORES","EPP":"A) CMV VENTA","GAS":"A) CMV VENTA","GASOIL":"A) CMV VENTA","DTM":"G) COSTO SERV TERCERIZADOS","ESTNQN":"K) ESTRUCTURA NQN","ESTRUC":"K) ESTRUCTURA","INVERS":"M) INVERSIONES","LOGIST":"I) LOGISTICA EGRESOS","MANMOD":"B) COSTO ALQUILER MODULO","MANREF":"C) COSTO ALQUILER REEFER","MANROD":"K) ESTRUCTURA","MANHRR":"K) ESTRUCTURA","MANMYU":"K) ESTRUCTURA","MANBSU":"K) ESTRUCTURA","PRGP":"P) PROVEEDORES GP","PRLDS":"P) PROVEEDORES LDS","PRMS":"P) PROVEEDORES MS","PROVEE":"P) PROVEEDORES","PRPS":"P) PROVEEDORES PS","BAMBOO":"A) CMV VENTA","IF0002":"A) CMV VENTA","IF3722":"A) CMV VENTA","IF3816":"A) CMV VENTA","IF3829":"A) CMV VENTA","IF3864":"A) CMV VENTA","IF3872":"A) CMV VENTA","IF3910":"A) CMV VENTA","IF3988":"A) CMV VENTA","IF3993":"A) CMV VENTA","IF4022":"A) CMV VENTA","IF4026":"A) CMV VENTA","IF4039":"A) CMV VENTA","IF4072":"A) CMV VENTA","IF4081":"A) CMV VENTA","IF4089":"A) CMV VENTA","IF4110":"A) CMV VENTA","IF4145":"A) CMV VENTA","IF4164":"A) CMV VENTA","IF4167":"A) CMV VENTA","IF4170":"A) CMV VENTA","IF4171":"A) CMV VENTA","IF4173":"A) CMV VENTA","IF4176":"A) CMV VENTA","IF4185":"A) CMV VENTA","IF4187":"A) CMV VENTA","IF4209":"A) CMV VENTA","IF4214":"A) CMV VENTA","IF4234":"A) CMV VENTA","IF4247":"A) CMV VENTA","IF4252":"M) INVERSIONES","IF4256":"A) CMV VENTA","IF4258":"A) CMV VENTA","IF4262":"A) CMV VENTA","IF4266":"A) CMV VENTA","IF4271":"A) CMV VENTA","IF4285":"A) CMV VENTA","IF4286":"A) CMV VENTA","IF4287":"A) CMV VENTA","IF4292":"A) CMV VENTA","IF4294":"A) CMV VENTA","IF4296":"A) CMV VENTA","IF4305":"A) CMV VENTA","IF4308":"A) CMV VENTA","IF4310":"A) CMV VENTA","IF4314":"A) CMV VENTA","IF4315":"A) CMV VENTA","IF4321":"M) INVERSIONES","IF4334":"A) CMV VENTA","IF4336":"A) CMV VENTA","IF4344":"A) CMV VENTA","IF4346":"B) COSTO ALQUILER MODULO","IF4352":"A) CMV VENTA","IF4356":"A) CMV VENTA","IF4363":"A) CMV VENTA","IF4368":"A) CMV VENTA","IF4372":"A) CMV VENTA","IF4389":"M) INVERSIONES","PL0004":"A) CMV VENTA","PL0005":"A) CMV VENTA","PL0026":"A) CMV VENTA","PL0027":"A) CMV VENTA","PL0030":"A) CMV VENTA","PL0031":"A) CMV VENTA","PL0033":"A) CMV VENTA","PL0038":"P) PROVEEDORES","PL0042":"A) CMV VENTA","PL0049":"A) CMV VENTA","PL0050":"K) ESTRUCTURA","PL0052":"M) INVERSIONES","PL0053":"A) CMV VENTA","PL0056":"P) PROVEEDORES","PL0057":"A) CMV VENTA","PL0058":"A) CMV VENTA","PL0061":"A) CMV VENTA","PL0063":"K) ESTRUCTURA","PL0065":"A) CMV VENTA","PL0066":"A) CMV VENTA","PL0072":"K) ESTRUCTURA","PL0075":"K) ESTRUCTURA","PL0078":"A) CMV VENTA","PL0079":"A) CMV VENTA","PL0088":"A) CMV VENTA","PL0090":"A) CMV VENTA","PL0092":"K) ESTRUCTURA","PL0093":"A) CMV VENTA","PL0096":"A) CMV VENTA","PL7601":"A) CMV VENTA","PL7602":"A) CMV VENTA","MANTRF":"C) COSTO ALQUILER REEFER"};
+/* 2026-10-02 -- Correccion del Control de cuadre (a pedido de Micaela, verificado contra su tabla de
+   referencia abr-25..ago-26 y el crudo real del mismo periodo). Antes, si un comprobante tenia AL MENOS
+   un renglon 02 en "A) VENTA"/"A) CMV VENTA", entraban TODOS sus renglones 03 -- incluso los que en el
+   02 estan imputados a otra linea. Caso tipico, el asiento de sueldos: el mismo comprobante reparte la
+   cuenta "Sueldos" en A) CMV VENTA (proyectos), M) INVERSIONES y N) SUELDOS, y en el 03 eso aparece como
+   los proyectos + "4) SUEPRO" + el proyecto de inversion; se sumaban todos. Resultado: CMV con SUE PRO,
+   NO APLICA, PROVEEDORES, INVERSION, ALQUILERES y proyectos de inversion/estructura (IF4346, PL0092,
+   PL0056, PL0063) que no son parte de la linea A -- diferencia de -204,7 M en abr-25..ago-26.
+   Ahora se resuelve por renglon: clave = Tipo comprobante + Nro. comprobante + Cod. cuenta.
+     - si en el 02 esa clave es 100% linea A -> entran todos sus renglones 03;
+     - si no tiene linea A -> no entra ninguno;
+     - si mezcla linea A con otra(s) -> entra el UNICO subconjunto de renglones 03 que suma exacto (al
+       centavo) el importe A del 02 (o, equivalente, se saca el unico subconjunto que suma lo no-A);
+       si hay empate (dos renglones con el mismo importe), se descartan primero los codigos que en el
+       mismo archivo solo aparecen en claves sin linea A (ej. PL0092, de inversion) y se reintenta.
+   Si aun asi no hay forma unica, se cae al criterio viejo (entran todos) para que la diferencia quede
+   a la vista en el Control de cuadre en vez de esconderse. Con el crudo abr-25..ago-26: 4925 claves
+   100% A, 46 mixtas resueltas (2 por desempate), 0 sin resolver; los 17 meses cuadran al peso con la
+   linea A del EERR y con la tabla de referencia de Micaela, proyecto por proyecto. */
+function subconjuntoExactoCMV(items,objetivo){
+  const n=items.length;
+  if(n===0||n>20) return null;
+  let encontrado=null;
+  for(let mask=1;mask<(1<<n);mask++){
+    let suma=0;
+    for(let i=0;i<n;i++) if(mask&(1<<i)) suma+=items[i].ars;
+    if(Math.abs(suma-objetivo)<0.005){
+      if(encontrado!==null) return null; // mas de una forma de lograrlo: no se adivina
+      encontrado=mask;
+    }
+  }
+  if(encontrado===null) return null;
+  return items.filter((_,i)=>encontrado&(1<<i));
+}
+function filasCMVLineaA(rows,S,N){
+  const k02={}, k03={};
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i]; if(!r) continue;
+    const tipo=S(r[1]), key=S(r[6])+"␟"+S(r[7])+"␟"+S(r[8]);
+    if(tipo==="02 - EERR"){
+      if(!k02[key]) k02[key]={};
+      const c=S(r[3]); k02[key][c]=(k02[key][c]||0)+N(r[12]);
+    } else if(tipo==="03 - INSTRUCTIVO DE FABRICACION"&&S(r[2])&&r.length>=13){
+      (k03[key]=k03[key]||[]).push({i,cod:S(r[2]),ars:N(r[12])});
+    }
+  }
+  const codEnA=new Set(), codSinA=new Set();
+  Object.keys(k03).forEach(key=>{
+    const cl=Object.keys(k02[key]||{}); if(!cl.length) return;
+    if(cl.every(c=>A_VENTA_CMV.has(c))) k03[key].forEach(x=>codEnA.add(x.cod));
+    else if(!cl.some(c=>A_VENTA_CMV.has(c))) k03[key].forEach(x=>codSinA.add(x.cod));
+  });
+  const incluidas=new Set();
+  Object.keys(k03).forEach(key=>{
+    const cl=k02[key]||{}, clases=Object.keys(cl), lst=k03[key];
+    if(!clases.some(c=>A_VENTA_CMV.has(c))) return;
+    if(clases.every(c=>A_VENTA_CMV.has(c))){ lst.forEach(x=>incluidas.add(x.i)); return; }
+    const impA=clases.filter(c=>A_VENTA_CMV.has(c)).reduce((s,c)=>s+cl[c],0);
+    const tot=lst.reduce((s,x)=>s+x.ars,0);
+    let sub=subconjuntoExactoCMV(lst,impA);
+    if(!sub){ const noA=subconjuntoExactoCMV(lst,tot-impA); if(noA){ const fuera=new Set(noA.map(x=>x.i)); sub=lst.filter(x=>!fuera.has(x.i)); } }
+    if(!sub) sub=subconjuntoExactoCMV(lst.filter(x=>codEnA.has(x.cod)||!codSinA.has(x.cod)),impA);
+    if(!sub){ console.warn("Proyectos·CMV: no se pudo partir por importe la clave "+key.replace(/␟/g," | ")+" -- entra completa (criterio viejo).",cl,lst); sub=lst; }
+    sub.forEach(x=>incluidas.add(x.i));
+  });
+  return incluidas;
+}
 function parseRawLedgerCMV(rows){
   const S=s=>(s==null?"":(""+s).trim());
   const N=x=>{const v=typeof x==="number"?x:parseFloat(x);return isNaN(v)?0:v;};
@@ -3246,6 +3313,7 @@ function parseRawLedgerCMV(rows){
     if(!comp02[key]) comp02[key]=new Set();
     comp02[key].add(S(r[3]));
   }
+  const incluidas=filasCMVLineaA(rows,S,N);
   const agg={}, avisos={};
   for(let i=1;i<rows.length;i++){
     const r=rows[i]; if(!r||r.length<13) continue;
@@ -3258,8 +3326,7 @@ function parseRawLedgerCMV(rows){
     const ars=N(r[12]), ext=N(r[15]), cotiz=N(r[17]), comprobante=S(r[7]);
     const key=S(r[6])+"␟"+comprobante;
     const clasifs=comp02[key]||new Set();
-    const esVentaCMV=[...clasifs].some(d=>A_VENTA_CMV.has(d));
-    if(esVentaCMV){
+    if(incluidas.has(i)){
       const tcOfic=tcOficFor(dstr,origen,ars,ext), tcBill=tcBillFor(dstr,origen,cotiz,comprobante);
       const usdOfic=tcOfic?ars/tcOfic:0, usdBill=tcBill?ars/tcBill:0;
       if(!agg[cod]) agg[cod]={desc,movs:{}};
