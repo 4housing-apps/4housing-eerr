@@ -3249,7 +3249,8 @@ const CLASIF_PROY_EERR={"A- STOCK":"B) COSTO ALQUILER MODULO","SUBALQ":"B) COSTO
      - si mezcla linea A con otra(s) -> entra el UNICO subconjunto de renglones 03 que suma exacto (al
        centavo) el importe A del 02 (o, equivalente, se saca el unico subconjunto que suma lo no-A);
        si hay empate (dos renglones con el mismo importe), se descartan primero los codigos que en el
-       mismo archivo solo aparecen en claves sin linea A (ej. PL0092, de inversion) y se reintenta.
+       mismo archivo aparecen mas seguido en claves sin linea A (ej. PL0092, de inversion, o "1) NA") y
+       se reintenta.
    Si aun asi no hay forma unica, se cae al criterio viejo (entran todos) para que la diferencia quede
    a la vista en el Control de cuadre en vez de esconderse. Con el crudo abr-25..ago-26: 4925 claves
    100% A, 46 mixtas resueltas (2 por desempate), 0 sin resolver; los 17 meses cuadran al peso con la
@@ -3281,12 +3282,15 @@ function filasCMVLineaA(rows,S,N){
       (k03[key]=k03[key]||[]).push({i,cod:S(r[2]),ars:N(r[12])});
     }
   }
-  const codEnA=new Set(), codSinA=new Set();
+  // Historial de cada codigo en el mismo archivo: cuantas veces aparece en claves 100% linea A y cuantas
+  // en claves sin linea A. Se usa solo para desempatar (ver abajo).
+  const vecesA={}, vecesNoA={};
   Object.keys(k03).forEach(key=>{
     const cl=Object.keys(k02[key]||{}); if(!cl.length) return;
-    if(cl.every(c=>A_VENTA_CMV.has(c))) k03[key].forEach(x=>codEnA.add(x.cod));
-    else if(!cl.some(c=>A_VENTA_CMV.has(c))) k03[key].forEach(x=>codSinA.add(x.cod));
+    if(cl.every(c=>A_VENTA_CMV.has(c))) k03[key].forEach(x=>{vecesA[x.cod]=(vecesA[x.cod]||0)+1;});
+    else if(!cl.some(c=>A_VENTA_CMV.has(c))) k03[key].forEach(x=>{vecesNoA[x.cod]=(vecesNoA[x.cod]||0)+1;});
   });
+  const propA=cod=>{const a=vecesA[cod]||0,n=vecesNoA[cod]||0; return (a+n)?a/(a+n):0.5;};
   const incluidas=new Set();
   Object.keys(k03).forEach(key=>{
     const cl=k02[key]||{}, clases=Object.keys(cl), lst=k03[key];
@@ -3296,7 +3300,21 @@ function filasCMVLineaA(rows,S,N){
     const tot=lst.reduce((s,x)=>s+x.ars,0);
     let sub=subconjuntoExactoCMV(lst,impA);
     if(!sub){ const noA=subconjuntoExactoCMV(lst,tot-impA); if(noA){ const fuera=new Set(noA.map(x=>x.i)); sub=lst.filter(x=>!fuera.has(x.i)); } }
-    if(!sub) sub=subconjuntoExactoCMV(lst.filter(x=>codEnA.has(x.cod)||!codSinA.has(x.cod)),impA);
+    if(!sub){
+      // Desempate (importes iguales, ej. 25.000 a A) CMV VENTA y 25.000 a K) ESTRUCTURA, con IF4310 y
+      // "1) NA" por 25.000 cada uno en el 03): se van descartando primero los codigos que en el archivo
+      // aparecen mas seguido fuera de la linea A (proporcion mas baja) hasta que quede una sola forma de
+      // llegar al importe A. 2026-10-02: antes solo se descartaban los codigos que NUNCA aparecian en
+      // claves 100% A, y "1) NA" (4 veces en A contra 1596 fuera, en abr-25..ago-26) se salvaba -- dejaba
+      // 25.000 (IF4310, oct-24) y 35.000 (IF4305, dic-23) de diferencia en el Control de cuadre.
+      const cortes=[...new Set(lst.map(x=>propA(x.cod)))].sort((a,b)=>a-b);
+      for(const t of cortes){
+        const cand=lst.filter(x=>propA(x.cod)>t);
+        if(!cand.length) break;
+        sub=subconjuntoExactoCMV(cand,impA);
+        if(sub) break;
+      }
+    }
     if(!sub){ console.warn("Proyectos·CMV: no se pudo partir por importe la clave "+key.replace(/␟/g," | ")+" -- entra completa (criterio viejo).",cl,lst); sub=lst; }
     sub.forEach(x=>incluidas.add(x.i));
   });
